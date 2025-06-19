@@ -146,6 +146,7 @@ $rol = $_SESSION['rol'];
                     <li><a class="dropdown-item" href="#" onclick="cargarContenido('Inventario/Inventario.php', event)">Ver Inventario</a></li>
                     <li><a class="dropdown-item" href="#" onclick="cargarContenido('Inventario/Categorias.php', event)">Categorías</a></li>
                     <li><a class="dropdown-item" href="#" onclick="cargarContenido('Inventario/Ubicacion.php', event)">Ubicación</a></li>
+                    <li><a class="dropdown-item" href="#" onclick="cargarContenido('Inventario/Maquinas.php', event)">Maquinas</a></li>
                 </ul>
             </div>
 
