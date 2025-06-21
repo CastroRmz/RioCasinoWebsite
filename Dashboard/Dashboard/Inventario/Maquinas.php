@@ -13,7 +13,6 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" && isset($_POST['accion'])) {
 
     // Agregar
     if ($_POST['accion'] === "agregar") {
-        $idmac = trim($_POST["idmac"] ?? '');
         $nombre = trim($_POST["nombre"] ?? '');
         $modelo = trim($_POST["modelo"] ?? '');
         $marca = trim($_POST["marca"] ?? '');
@@ -21,11 +20,13 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" && isset($_POST['accion'])) {
         $ebox_mac = trim($_POST["ebox_mac"] ?? '');
         $estado = $_POST["estado"] ?? '';
 
-        if ($idmac && $nombre && $modelo && $marca && $numero_serie) {
-            $stmt = $conn->prepare("INSERT INTO maquinas (idmac, nombre, modelo, marca, numero_serie, ebox_mac, estado, usuario) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
-            $stmt->bind_param("ssssssss", $idmac, $nombre, $modelo, $marca, $numero_serie, $ebox_mac, $estado, $usuario);
+        // Validación sin idmac (ya que es autoincremental)
+        if ($nombre && $modelo && $marca && $numero_serie) {
+            $stmt = $conn->prepare("INSERT INTO maquinas (nombre, modelo, marca, numero_serie, ebox_mac, estado, usuario) VALUES (?, ?, ?, ?, ?, ?, ?)");
+            $stmt->bind_param("sssssss", $nombre, $modelo, $marca, $numero_serie, $ebox_mac, $estado, $usuario);
+            
             if ($stmt->execute()) {
-                $idmac = $stmt->insert_id;
+                $idmac = $stmt->insert_id; // Obtenemos el ID generado automáticamente
                 $desc = "Máquina creada";
                 $historial = $conn->prepare("INSERT INTO historial_maquinas (idmac, descripcion, usuario) VALUES (?, ?, ?)");
                 $historial->bind_param("iss", $idmac, $desc, $usuario);
@@ -44,7 +45,6 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" && isset($_POST['accion'])) {
     // Editar
     if ($_POST['accion'] === "editar") {
         $idmac = intval($_POST["idmac"] ?? 0);
-        $idmac = trim($_POST["idmac"] ?? '');
         $nombre = trim($_POST["nombre"] ?? '');
         $modelo = trim($_POST["modelo"] ?? '');
         $marca = trim($_POST["marca"] ?? '');
@@ -52,9 +52,9 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" && isset($_POST['accion'])) {
         $ebox_mac = trim($_POST["ebox_mac"] ?? '');
         $estado = $_POST["estado"] ?? '';
 
-        if ($idmac > 0 && $idmac && $nombre && $modelo && $marca && $numero_serie) {
-            $stmt = $conn->prepare("UPDATE maquinas SET idmac=?, nombre=?, modelo=?, marca=?, numero_serie=?, ebox_mac=?, estado=? WHERE idmac=?");
-            $stmt->bind_param("sssssssi", $idmac, $nombre, $modelo, $marca, $numero_serie, $ebox_mac, $estado, $idmac);
+        if ($idmac > 0 && $nombre && $modelo && $marca && $numero_serie) {
+            $stmt = $conn->prepare("UPDATE maquinas SET nombre=?, modelo=?, marca=?, numero_serie=?, ebox_mac=?, estado=? WHERE idmac=?");
+            $stmt->bind_param("ssssssi", $nombre, $modelo, $marca, $numero_serie, $ebox_mac, $estado, $idmac);
 
             if ($stmt->execute()) {
                 $desc = "Máquina editada";
@@ -125,22 +125,75 @@ if ($result->num_rows > 0) {
     $result->data_seek(0); // Reiniciar el puntero del resultado para usarlo más tarde
 }
 ?>
-
 <!DOCTYPE html>
 <html lang="es">
 <head>
     <meta charset="UTF-8" />
     <title>Gestión de Máquinas</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
     <style>
         .table-responsive {
             overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
+        }
+        .table {
+            width: 100%;
+            margin-bottom: 1rem;
+            color: #212529;
+        }
+        .table th, .table td {
+            padding: 0.75rem;
+            vertical-align: top;
+            border-top: 1px solid #dee2e6;
+        }
+        .table thead th {
+            vertical-align: bottom;
+            border-bottom: 2px solid #dee2e6;
+        }
+        .table-bordered {
+            border: 1px solid #dee2e6;
+        }
+        .table-bordered th, .table-bordered td {
+            border: 1px solid #dee2e6;
+        }
+        .table-striped tbody tr:nth-of-type(odd) {
+            background-color: rgba(0, 0, 0, 0.05);
+        }
+        .text-nowrap {
+            white-space: nowrap;
         }
         .modal-lg {
             max-width: 800px;
         }
         .modal-xl {
             max-width: 1140px;
+        }
+        .btn-sm {
+            padding: 0.25rem 0.5rem;
+            font-size: 0.875rem;
+            line-height: 1.5;
+            border-radius: 0.2rem;
+        }
+        .badge {
+            display: inline-block;
+            padding: 0.35em 0.65em;
+            font-size: 0.75em;
+            font-weight: 700;
+            line-height: 1;
+            text-align: center;
+            white-space: nowrap;
+            vertical-align: baseline;
+            border-radius: 0.25rem;
+        }
+        .bg-success {
+            background-color: #198754!important;
+        }
+        .bg-danger {
+            background-color: #dc3545!important;
+        }
+        .bg-warning {
+            background-color: #fd7e14!important;
         }
     </style>
 </head>
@@ -153,25 +206,29 @@ if ($result->num_rows > 0) {
     <?php endif; ?>
 
     <div class="mb-3 d-flex flex-column flex-md-row justify-content-between align-items-start align-items-md-center gap-2">
-        <button class="btn btn-success" data-bs-toggle="modal" data-bs-target="#modalAgregar">Agregar Máquina</button>
-        <button class="btn btn-warning" data-bs-toggle="modal" data-bs-target="#modalHistorialGeneral">Ver Historial General</button>
+        <button class="btn btn-success" data-bs-toggle="modal" data-bs-target="#modalAgregar">
+            <i class="bi bi-plus-circle"></i> Agregar Máquina
+        </button>
+        <button class="btn btn-warning" data-bs-toggle="modal" data-bs-target="#modalHistorialGeneral">
+            <i class="bi bi-clock-history"></i> Ver Historial General
+        </button>
     </div>
 
     <!-- Contenedor responsivo para tabla -->
     <div class="table-responsive">
-        <table class="table table-bordered table-striped align-middle mb-0">
+        <table class="table table-bordered table-striped table-hover align-middle mb-0">
             <thead class="table-dark">
                 <tr>
-                    <th>ID</th>
+                    <th width="50">ID</th>
                     <th>Nombre</th>
                     <th>Modelo</th>
                     <th>Marca</th>
-                    <th>Número de Serie</th>
+                    <th>N° Serie</th>
                     <th>Ebox MAC</th>
-                    <th>Estado</th>
-                    <th>Fecha Creación</th>
-                    <th>Usuario</th>
-                    <th>Acciones</th>
+                    <th width="100">Estado</th>
+                    <th width="150">Fecha Creación</th>
+                    <th width="120">Usuario</th>
+                    <th width="220">Acciones</th>
                 </tr>
             </thead>
             <tbody>
@@ -183,14 +240,30 @@ if ($result->num_rows > 0) {
                     <td><?= htmlspecialchars($row['marca'] ?? '') ?></td>
                     <td><?= htmlspecialchars($row['numero_serie'] ?? '') ?></td>
                     <td><?= htmlspecialchars($row['ebox_mac'] ?? '') ?></td>
-                    <td><?= htmlspecialchars($row['estado'] ?? '') ?></td>
-                    <td><?= htmlspecialchars($row['fecha_creacion'] ?? '') ?></td>
+                    <td>
+                        <span class="badge bg-<?= 
+                            ($row['estado'] == 'Alta') ? 'success' : 
+                            (($row['estado'] == 'Baja') ? 'danger' : 'warning') ?>">
+                            <?= htmlspecialchars($row['estado'] ?? '') ?>
+                        </span>
+                    </td>
+                    <td><?= date('d/m/Y H:i', strtotime($row['fecha_creacion'])) ?></td>
                     <td><?= htmlspecialchars($row['usuario'] ?? '') ?></td>
                     <td class="text-nowrap">
-                        <button class="btn btn-info btn-sm mb-1" data-bs-toggle="modal" data-bs-target="#modalVer<?= $row['idmac'] ?>">Ver</button>
-                        <button class="btn btn-primary btn-sm mb-1" data-bs-toggle="modal" data-bs-target="#modalEditar<?= $row['idmac'] ?>">Editar</button>
-                        <button class="btn btn-secondary btn-sm mb-1" data-bs-toggle="modal" data-bs-target="#modalHistorial<?= $row['idmac'] ?>">Historial</button>
-                        <a href="?accion=eliminar&idmac=<?= $row['idmac'] ?>" class="btn btn-danger btn-sm mb-1" onclick="return confirm('¿Eliminar esta máquina?');">Eliminar</a>
+                        <div class="d-flex flex-wrap gap-1">
+                            <button class="btn btn-info btn-sm" data-bs-toggle="modal" data-bs-target="#modalVer<?= $row['idmac'] ?>">
+                                <i class="bi bi-eye"></i> Ver
+                            </button>
+                            <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#modalEditar<?= $row['idmac'] ?>">
+                                <i class="bi bi-pencil"></i> Editar
+                            </button>
+                            <button class="btn btn-secondary btn-sm" data-bs-toggle="modal" data-bs-target="#modalHistorial<?= $row['idmac'] ?>">
+                                <i class="bi bi-clock-history"></i> Historial
+                            </button>
+                            <a href="?accion=eliminar&idmac=<?= $row['idmac'] ?>" class="btn btn-danger btn-sm" onclick="return confirm('¿Eliminar esta máquina?');">
+                                <i class="bi bi-trash"></i> Eliminar
+                            </a>
+                        </div>
                     </td>
                 </tr>
 
@@ -209,8 +282,14 @@ if ($result->num_rows > 0) {
                         <p><strong>Marca:</strong> <?= htmlspecialchars($row['marca'] ?? '') ?></p>
                         <p><strong>Número de Serie:</strong> <?= htmlspecialchars($row['numero_serie'] ?? '') ?></p>
                         <p><strong>Ebox MAC:</strong> <?= htmlspecialchars($row['ebox_mac'] ?? '') ?></p>
-                        <p><strong>Estado:</strong> <?= htmlspecialchars($row['estado'] ?? '') ?></p>
-                        <p><strong>Fecha Creación:</strong> <?= htmlspecialchars($row['fecha_creacion'] ?? '') ?></p>
+                        <p><strong>Estado:</strong> 
+                            <span class="badge bg-<?= 
+                                ($row['estado'] == 'Alta') ? 'success' : 
+                                (($row['estado'] == 'Baja') ? 'danger' : 'warning') ?>">
+                                <?= htmlspecialchars($row['estado'] ?? '') ?>
+                            </span>
+                        </p>
+                        <p><strong>Fecha Creación:</strong> <?= date('d/m/Y H:i', strtotime($row['fecha_creacion'])) ?></p>
                         <p><strong>Usuario:</strong> <?= htmlspecialchars($row['usuario'] ?? '') ?></p>
                       </div>
                       <div class="modal-footer">
@@ -233,12 +312,6 @@ if ($result->num_rows > 0) {
                         <div class="modal-body">
                           <input type="hidden" name="accion" value="editar">
                           <input type="hidden" name="idmac" value="<?= $row['idmac'] ?>">
-                          
-                          <div class="mb-3">
-                            <label for="idMaquinaEditar<?= $row['idmac'] ?>" class="form-label">ID Máquina</label>
-                            <input type="text" class="form-control" id="idMaquinaEditar<?= $row['idmac'] ?>" 
-                                   name="idmac" value="<?= htmlspecialchars($row['idmac'] ?? '') ?>" required>
-                          </div>
                           
                           <div class="mb-3">
                             <label for="nombreEditar<?= $row['idmac'] ?>" class="form-label">Nombre</label>
@@ -291,7 +364,7 @@ if ($result->num_rows > 0) {
 
                 <!-- Modal Historial por máquina -->
                 <div class="modal fade" id="modalHistorial<?= $row['idmac'] ?>" tabindex="-1" aria-hidden="true">
-                    <div class="modal-dialog modal-fullscreen-md-down modal-dialog-scrollable">
+                    <div class="modal-dialog modal-lg modal-dialog-scrollable">
                         <div class="modal-content">
                             <div class="modal-header bg-secondary text-white">
                                 <h5 class="modal-title">Historial - Máquina: <?= htmlspecialchars($row['idmac'] ?? '') ?> - <?= htmlspecialchars($row['nombre'] ?? '') ?></h5>
@@ -303,10 +376,10 @@ if ($result->num_rows > 0) {
                                         <table class="table table-striped table-bordered mb-0">
                                             <thead class="table-light">
                                                 <tr>
-                                                    <th style="width: 10%;">ID</th>
-                                                    <th style="width: 40%;">Descripción</th>
-                                                    <th style="width: 20%;">Usuario</th>
-                                                    <th style="width: 30%;">Fecha</th>
+                                                    <th width="80">ID</th>
+                                                    <th>Descripción</th>
+                                                    <th width="120">Usuario</th>
+                                                    <th width="180">Fecha</th>
                                                 </tr>
                                             </thead>
                                             <tbody>
@@ -315,15 +388,15 @@ if ($result->num_rows > 0) {
                                                         <td><?= $hist['id'] ?></td>
                                                         <td><?= htmlspecialchars($hist['descripcion'] ?? '') ?></td>
                                                         <td><?= htmlspecialchars($hist['usuario'] ?? '') ?></td>
-                                                        <td><?= htmlspecialchars($hist['fecha_cambio'] ?? '') ?></td>
+                                                        <td><?= date('d/m/Y H:i', strtotime($hist['fecha_cambio'])) ?></td>
                                                     </tr>
                                                 <?php endforeach; ?>
                                             </tbody>
                                         </table>
                                     </div>
                                 <?php else: ?>
-                                    <div class="p-3">
-                                        <p class="mb-0">No hay historial para esta máquina.</p>
+                                    <div class="p-3 text-center">
+                                        <div class="alert alert-info mb-0">No hay historial para esta máquina.</div>
                                     </div>
                                 <?php endif; ?>
                             </div>
@@ -342,7 +415,7 @@ if ($result->num_rows > 0) {
 
 <!-- Modal Agregar Máquina -->
 <div class="modal fade" id="modalAgregar" tabindex="-1" aria-labelledby="modalAgregarLabel" aria-hidden="true">
-  <div class="modal-dialog modal-dialog-centered modal-md">
+  <div class="modal-dialog modal-dialog-centered">
     <form method="post" class="modal-content">
       <div class="modal-header bg-success text-white">
         <h5 class="modal-title" id="modalAgregarLabel">Agregar Máquina</h5>
@@ -350,11 +423,6 @@ if ($result->num_rows > 0) {
       </div>
       <div class="modal-body">
         <input type="hidden" name="accion" value="agregar">
-
-        <div class="mb-3">
-          <label for="idMaquinaAgregar" class="form-label">ID Máquina:</label>
-          <input type="text" id="idMaquinaAgregar" name="idmac" class="form-control" required>
-        </div>
 
         <div class="mb-3">
           <label for="nombreAgregar" class="form-label">Nombre:</label>
@@ -401,7 +469,7 @@ if ($result->num_rows > 0) {
 
 <!-- Modal Historial General -->
 <div class="modal fade" id="modalHistorialGeneral" tabindex="-1" aria-hidden="true">
-  <div class="modal-dialog modal-dialog-centered modal-xl">
+  <div class="modal-dialog modal-xl modal-dialog-scrollable">
     <div class="modal-content">
       <div class="modal-header bg-warning text-dark">
         <h5 class="modal-title">Historial General</h5>
@@ -409,25 +477,27 @@ if ($result->num_rows > 0) {
       </div>
       <div class="modal-body p-0">
         <?php if ($historialGeneral && $historialGeneral->num_rows > 0): ?>
-          <div class="table-responsive m-3">
+          <div class="table-responsive">
             <table class="table table-striped table-bordered mb-0">
               <thead>
                 <tr>
-                  <th>ID Historial</th>
-                  <th>Máquina</th>
+                  <th width="100">ID Historial</th>
+                  <th width="100">Máquina ID</th>
+                  <th>Nombre Máquina</th>
                   <th>Descripción</th>
-                  <th>Usuario</th>
-                  <th>Fecha</th>
+                  <th width="120">Usuario</th>
+                  <th width="180">Fecha</th>
                 </tr>
               </thead>
               <tbody>
                 <?php while ($hg = $historialGeneral->fetch_assoc()): ?>
                   <tr>
                     <td><?= $hg['id'] ?></td>
-                    <td><?= htmlspecialchars($hg['idmac'] ?? '') ?> - <?= htmlspecialchars($hg['nombre_maquina'] ?? "Sin máquina") ?></td>
+                    <td><?= htmlspecialchars($hg['idmac'] ?? '') ?></td>
+                    <td><?= htmlspecialchars($hg['nombre_maquina'] ?? "Sin máquina") ?></td>
                     <td><?= htmlspecialchars($hg['descripcion'] ?? '') ?></td>
                     <td><?= htmlspecialchars($hg['usuario'] ?? '') ?></td>
-                    <td><?= htmlspecialchars($hg['fecha_cambio'] ?? '') ?></td>
+                    <td><?= date('d/m/Y H:i', strtotime($hg['fecha_cambio'])) ?></td>
                   </tr>
                 <?php endwhile; ?>
               </tbody>
