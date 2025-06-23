@@ -20,13 +20,12 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" && isset($_POST['accion'])) {
         $ebox_mac = trim($_POST["ebox_mac"] ?? '');
         $estado = $_POST["estado"] ?? '';
 
-        // Validación sin idmac (ya que es autoincremental)
         if ($nombre && $modelo && $marca && $numero_serie) {
             $stmt = $conn->prepare("INSERT INTO maquinas (nombre, modelo, marca, numero_serie, ebox_mac, estado, usuario) VALUES (?, ?, ?, ?, ?, ?, ?)");
             $stmt->bind_param("sssssss", $nombre, $modelo, $marca, $numero_serie, $ebox_mac, $estado, $usuario);
             
             if ($stmt->execute()) {
-                $idmac = $stmt->insert_id; // Obtenemos el ID generado automáticamente
+                $idmac = $stmt->insert_id;
                 $desc = "Máquina creada";
                 $historial = $conn->prepare("INSERT INTO historial_maquinas (idmac, descripcion, usuario) VALUES (?, ?, ?)");
                 $historial->bind_param("iss", $idmac, $desc, $usuario);
@@ -97,18 +96,10 @@ if (isset($_GET["accion"]) && $_GET["accion"] === "eliminar" && isset($_GET["idm
 // Obtener máquinas para tabla
 $result = $conn->query("SELECT * FROM maquinas ORDER BY idmac DESC");
 
-// Obtener historial general
-$historialGeneral = $conn->query("
-    SELECT h.*, m.nombre AS nombre_maquina, m.idmac 
-    FROM historial_maquinas h 
-    LEFT JOIN maquinas m ON h.idmac = m.idmac 
-    ORDER BY h.id DESC
-");
-
 // Preparar historial por máquina
 $historialPorMaquina = [];
 if ($result->num_rows > 0) {
-    $result->data_seek(0); // Reiniciar el puntero del resultado
+    $result->data_seek(0);
     while ($maquina = $result->fetch_assoc()) {
         $idmac = $maquina['idmac'];
         $historialQuery = $conn->prepare("SELECT * FROM historial_maquinas WHERE idmac = ? ORDER BY id DESC");
@@ -122,7 +113,7 @@ if ($result->num_rows > 0) {
         }
         $historialQuery->close();
     }
-    $result->data_seek(0); // Reiniciar el puntero del resultado para usarlo más tarde
+    $result->data_seek(0);
 }
 ?>
 <!DOCTYPE html>
@@ -133,91 +124,122 @@ if ($result->num_rows > 0) {
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" />
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
     <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f8f9fa;
+        }
+        .container {
+            max-width: 100%;
+            padding: 20px;
+        }
         .table-responsive {
             overflow-x: auto;
             -webkit-overflow-scrolling: touch;
+            border-radius: 8px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+            background-color: white;
         }
         .table {
             width: 100%;
-            margin-bottom: 1rem;
+            margin-bottom: 0;
             color: #212529;
+            font-size: 14px;
         }
-        .table th, .table td {
-            padding: 0.75rem;
-            vertical-align: top;
-            border-top: 1px solid #dee2e6;
+        .table th {
+            background-color: #343a40;
+            color: white;
+            font-weight: 500;
+            padding: 12px 15px;
+            vertical-align: middle;
         }
-        .table thead th {
-            vertical-align: bottom;
-            border-bottom: 2px solid #dee2e6;
-        }
-        .table-bordered {
-            border: 1px solid #dee2e6;
-        }
-        .table-bordered th, .table-bordered td {
-            border: 1px solid #dee2e6;
+        .table td {
+            padding: 10px 15px;
+            vertical-align: middle;
+            border-top: 1px solid #e9ecef;
         }
         .table-striped tbody tr:nth-of-type(odd) {
+            background-color: rgba(0, 0, 0, 0.02);
+        }
+        .table-hover tbody tr:hover {
             background-color: rgba(0, 0, 0, 0.05);
         }
-        .text-nowrap {
-            white-space: nowrap;
-        }
-        .modal-lg {
-            max-width: 800px;
-        }
-        .modal-xl {
-            max-width: 1140px;
-        }
-        .btn-sm {
-            padding: 0.25rem 0.5rem;
-            font-size: 0.875rem;
-            line-height: 1.5;
-            border-radius: 0.2rem;
-        }
         .badge {
-            display: inline-block;
-            padding: 0.35em 0.65em;
-            font-size: 0.75em;
-            font-weight: 700;
-            line-height: 1;
-            text-align: center;
-            white-space: nowrap;
-            vertical-align: baseline;
-            border-radius: 0.25rem;
+            font-size: 12px;
+            font-weight: 500;
+            padding: 5px 10px;
+            border-radius: 4px;
         }
         .bg-success {
-            background-color: #198754!important;
+            background-color: #28a745 !important;
         }
         .bg-danger {
-            background-color: #dc3545!important;
+            background-color: #dc3545 !important;
         }
         .bg-warning {
-            background-color: #fd7e14!important;
+            background-color: #ffc107 !important;
+            color: #212529;
+        }
+        .btn-sm {
+            padding: 5px 10px;
+            font-size: 12px;
+        }
+        .btn-group-sm .btn {
+            padding: 5px 10px;
+            font-size: 12px;
+        }
+        .page-title {
+            color: #343a40;
+            margin-bottom: 20px;
+            font-weight: 600;
+        }
+        .action-buttons {
+            display: flex;
+            gap: 5px;
+            flex-wrap: wrap;
+        }
+        .modal-header {
+            padding: 15px 20px;
+        }
+        .modal-title {
+            font-weight: 500;
+        }
+        .alert {
+            padding: 10px 15px;
+            margin-bottom: 20px;
+            border-radius: 4px;
+        }
+        .historial-table {
+            background-color: #f8f9fa;
+        }
+        .historial-table th {
+            background-color: #e9ecef;
         }
     </style>
 </head>
-<body class="bg-light">
+<body>
 <div class="container py-4">
-    <h2 class="mb-4">Gestión de Máquinas</h2>
+    <h2 class="page-title">Gestión de Máquinas</h2>
 
     <?php if ($msg): ?>
-        <div class="alert alert-info"><?= htmlspecialchars($msg) ?></div>
+        <div class="alert alert-info alert-dismissible fade show">
+            <?= htmlspecialchars($msg) ?>
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+        </div>
     <?php endif; ?>
 
-    <div class="mb-3 d-flex flex-column flex-md-row justify-content-between align-items-start align-items-md-center gap-2">
+    <div class="d-flex justify-content-between mb-4">
         <button class="btn btn-success" data-bs-toggle="modal" data-bs-target="#modalAgregar">
             <i class="bi bi-plus-circle"></i> Agregar Máquina
         </button>
         <button class="btn btn-warning" data-bs-toggle="modal" data-bs-target="#modalHistorialGeneral">
-            <i class="bi bi-clock-history"></i> Ver Historial General
+            <i class="bi bi-clock-history"></i> Historial General
         </button>
     </div>
 
-    <!-- Contenedor responsivo para tabla -->
+    <!-- Tabla de máquinas -->
     <div class="table-responsive">
-        <table class="table table-bordered table-striped table-hover align-middle mb-0">
-            <thead class="table-dark">
+        <table class="table table-striped table-hover table-bordered">
+            <thead>
                 <tr>
                     <th width="50">ID</th>
                     <th>Nombre</th>
@@ -226,13 +248,14 @@ if ($result->num_rows > 0) {
                     <th>N° Serie</th>
                     <th>Ebox MAC</th>
                     <th width="100">Estado</th>
-                    <th width="150">Fecha Creación</th>
-                    <th width="120">Usuario</th>
+                    <th width="120">Fecha Creación</th>
+                    <th width="100">Usuario</th>
                     <th width="220">Acciones</th>
                 </tr>
             </thead>
             <tbody>
-            <?php while ($row = $result->fetch_assoc()): ?>
+            <?php if ($result->num_rows > 0): ?>
+                <?php while ($row = $result->fetch_assoc()): ?>
                 <tr>
                     <td><?= htmlspecialchars($row['idmac'] ?? '') ?></td>
                     <td><?= htmlspecialchars($row['nombre'] ?? '') ?></td>
@@ -249,8 +272,8 @@ if ($result->num_rows > 0) {
                     </td>
                     <td><?= date('d/m/Y H:i', strtotime($row['fecha_creacion'])) ?></td>
                     <td><?= htmlspecialchars($row['usuario'] ?? '') ?></td>
-                    <td class="text-nowrap">
-                        <div class="d-flex flex-wrap gap-1">
+                    <td>
+                        <div class="action-buttons">
                             <button class="btn btn-info btn-sm" data-bs-toggle="modal" data-bs-target="#modalVer<?= $row['idmac'] ?>">
                                 <i class="bi bi-eye"></i> Ver
                             </button>
@@ -260,154 +283,18 @@ if ($result->num_rows > 0) {
                             <button class="btn btn-secondary btn-sm" data-bs-toggle="modal" data-bs-target="#modalHistorial<?= $row['idmac'] ?>">
                                 <i class="bi bi-clock-history"></i> Historial
                             </button>
-                            <a href="?accion=eliminar&idmac=<?= $row['idmac'] ?>" class="btn btn-danger btn-sm" onclick="return confirm('¿Eliminar esta máquina?');">
+                            <a href="?accion=eliminar&idmac=<?= $row['idmac'] ?>" class="btn btn-danger btn-sm" onclick="return confirm('¿Estás seguro de eliminar esta máquina?');">
                                 <i class="bi bi-trash"></i> Eliminar
                             </a>
                         </div>
                     </td>
                 </tr>
-
-                <!-- Modal Ver -->
-                <div class="modal fade" id="modalVer<?= $row['idmac'] ?>" tabindex="-1" aria-hidden="true">
-                  <div class="modal-dialog modal-dialog-centered modal-sm">
-                    <div class="modal-content">
-                      <div class="modal-header bg-info text-white">
-                        <h5 class="modal-title">Detalles de Máquina</h5>
-                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
-                      </div>
-                      <div class="modal-body">
-                        <p><strong>ID:</strong> <?= htmlspecialchars($row['idmac'] ?? '') ?></p>
-                        <p><strong>Nombre:</strong> <?= htmlspecialchars($row['nombre'] ?? '') ?></p>
-                        <p><strong>Modelo:</strong> <?= htmlspecialchars($row['modelo'] ?? '') ?></p>
-                        <p><strong>Marca:</strong> <?= htmlspecialchars($row['marca'] ?? '') ?></p>
-                        <p><strong>Número de Serie:</strong> <?= htmlspecialchars($row['numero_serie'] ?? '') ?></p>
-                        <p><strong>Ebox MAC:</strong> <?= htmlspecialchars($row['ebox_mac'] ?? '') ?></p>
-                        <p><strong>Estado:</strong> 
-                            <span class="badge bg-<?= 
-                                ($row['estado'] == 'Alta') ? 'success' : 
-                                (($row['estado'] == 'Baja') ? 'danger' : 'warning') ?>">
-                                <?= htmlspecialchars($row['estado'] ?? '') ?>
-                            </span>
-                        </p>
-                        <p><strong>Fecha Creación:</strong> <?= date('d/m/Y H:i', strtotime($row['fecha_creacion'])) ?></p>
-                        <p><strong>Usuario:</strong> <?= htmlspecialchars($row['usuario'] ?? '') ?></p>
-                      </div>
-                      <div class="modal-footer">
-                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cerrar</button>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <!-- Modal Editar -->
-                <div class="modal fade" id="modalEditar<?= $row['idmac'] ?>" tabindex="-1" aria-labelledby="modalEditarLabel<?= $row['idmac'] ?>" aria-hidden="true">
-                  <div class="modal-dialog modal-dialog-centered">
-                    <div class="modal-content">
-                      <form method="post">
-                        <div class="modal-header bg-primary text-white">
-                          <h5 class="modal-title" id="modalEditarLabel<?= $row['idmac'] ?>">Editar Máquina</h5>
-                          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
-                        </div>
-                        
-                        <div class="modal-body">
-                          <input type="hidden" name="accion" value="editar">
-                          <input type="hidden" name="idmac" value="<?= $row['idmac'] ?>">
-                          
-                          <div class="mb-3">
-                            <label for="nombreEditar<?= $row['idmac'] ?>" class="form-label">Nombre</label>
-                            <input type="text" class="form-control" id="nombreEditar<?= $row['idmac'] ?>" 
-                                   name="nombre" value="<?= htmlspecialchars($row['nombre'] ?? '') ?>" required>
-                          </div>
-                          
-                          <div class="mb-3">
-                            <label for="modeloEditar<?= $row['idmac'] ?>" class="form-label">Modelo</label>
-                            <input type="text" class="form-control" id="modeloEditar<?= $row['idmac'] ?>" 
-                                   name="modelo" value="<?= htmlspecialchars($row['modelo'] ?? '') ?>" required>
-                          </div>
-                          
-                          <div class="mb-3">
-                            <label for="marcaEditar<?= $row['idmac'] ?>" class="form-label">Marca</label>
-                            <input type="text" class="form-control" id="marcaEditar<?= $row['idmac'] ?>" 
-                                   name="marca" value="<?= htmlspecialchars($row['marca'] ?? '') ?>" required>
-                          </div>
-                          
-                          <div class="mb-3">
-                            <label for="serieEditar<?= $row['idmac'] ?>" class="form-label">Número de Serie</label>
-                            <input type="text" class="form-control" id="serieEditar<?= $row['idmac'] ?>" 
-                                   name="numero_serie" value="<?= htmlspecialchars($row['numero_serie'] ?? '') ?>" required>
-                          </div>
-                          
-                          <div class="mb-3">
-                            <label for="macEditar<?= $row['idmac'] ?>" class="form-label">Ebox MAC</label>
-                            <input type="text" class="form-control" id="macEditar<?= $row['idmac'] ?>" 
-                                   name="ebox_mac" value="<?= htmlspecialchars($row['ebox_mac'] ?? '') ?>">
-                          </div>
-                          
-                          <div class="mb-3">
-                            <label for="estadoEditar<?= $row['idmac'] ?>" class="form-label">Estado</label>
-                            <select class="form-select" id="estadoEditar<?= $row['idmac'] ?>" name="estado" required>
-                              <option value="Alta" <?= ($row['estado'] ?? '') === 'Alta' ? 'selected' : '' ?>>Alta</option>
-                              <option value="Baja" <?= ($row['estado'] ?? '') === 'Baja' ? 'selected' : '' ?>>Baja</option>
-                              <option value="Proceso" <?= ($row['estado'] ?? '') === 'Proceso' ? 'selected' : '' ?>>Proceso</option>
-                            </select>
-                          </div>
-                        </div>
-                        
-                        <div class="modal-footer">
-                          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
-                          <button type="submit" class="btn btn-primary">Guardar Cambios</button>
-                        </div>
-                      </form>
-                    </div>
-                  </div>
-                </div>
-
-                <!-- Modal Historial por máquina -->
-                <div class="modal fade" id="modalHistorial<?= $row['idmac'] ?>" tabindex="-1" aria-hidden="true">
-                    <div class="modal-dialog modal-lg modal-dialog-scrollable">
-                        <div class="modal-content">
-                            <div class="modal-header bg-secondary text-white">
-                                <h5 class="modal-title">Historial - Máquina: <?= htmlspecialchars($row['idmac'] ?? '') ?> - <?= htmlspecialchars($row['nombre'] ?? '') ?></h5>
-                                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
-                            </div>
-                            <div class="modal-body p-0">
-                                <?php if (!empty($historialPorMaquina[$row['idmac']])): ?>
-                                    <div class="table-responsive">
-                                        <table class="table table-striped table-bordered mb-0">
-                                            <thead class="table-light">
-                                                <tr>
-                                                    <th width="80">ID</th>
-                                                    <th>Descripción</th>
-                                                    <th width="120">Usuario</th>
-                                                    <th width="180">Fecha</th>
-                                                </tr>
-                                            </thead>
-                                            <tbody>
-                                                <?php foreach ($historialPorMaquina[$row['idmac']] as $hist): ?>
-                                                    <tr>
-                                                        <td><?= $hist['id'] ?></td>
-                                                        <td><?= htmlspecialchars($hist['descripcion'] ?? '') ?></td>
-                                                        <td><?= htmlspecialchars($hist['usuario'] ?? '') ?></td>
-                                                        <td><?= date('d/m/Y H:i', strtotime($hist['fecha_cambio'])) ?></td>
-                                                    </tr>
-                                                <?php endforeach; ?>
-                                            </tbody>
-                                        </table>
-                                    </div>
-                                <?php else: ?>
-                                    <div class="p-3 text-center">
-                                        <div class="alert alert-info mb-0">No hay historial para esta máquina.</div>
-                                    </div>
-                                <?php endif; ?>
-                            </div>
-                            <div class="modal-footer">
-                                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cerrar</button>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-            <?php endwhile; ?>
+                <?php endwhile; ?>
+            <?php else: ?>
+                <tr>
+                    <td colspan="10" class="text-center py-4">No hay máquinas registradas</td>
+                </tr>
+            <?php endif; ?>
             </tbody>
         </table>
     </div>
@@ -476,7 +363,15 @@ if ($result->num_rows > 0) {
         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
       </div>
       <div class="modal-body p-0">
-        <?php if ($historialGeneral && $historialGeneral->num_rows > 0): ?>
+        <?php 
+        $historialGeneral = $conn->query("
+            SELECT h.*, m.nombre AS nombre_maquina, m.idmac 
+            FROM historial_maquinas h 
+            LEFT JOIN maquinas m ON h.idmac = m.idmac 
+            ORDER BY h.id DESC
+        ");
+        
+        if ($historialGeneral && $historialGeneral->num_rows > 0): ?>
           <div class="table-responsive">
             <table class="table table-striped table-bordered mb-0">
               <thead>
@@ -513,6 +408,178 @@ if ($result->num_rows > 0) {
     </div>
   </div>
 </div>
+
+<!-- Modal Ver -->
+<?php if ($result->num_rows > 0): ?>
+    <?php $result->data_seek(0); ?>
+    <?php while ($row = $result->fetch_assoc()): ?>
+    <div class="modal fade" id="modalVer<?= $row['idmac'] ?>" tabindex="-1" aria-hidden="true">
+      <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+          <div class="modal-header bg-info text-white">
+            <h5 class="modal-title">Detalles de Máquina</h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+          </div>
+          <div class="modal-body">
+            <div class="row mb-3">
+                <div class="col-md-4 fw-bold">ID:</div>
+                <div class="col-md-8"><?= htmlspecialchars($row['idmac'] ?? '') ?></div>
+            </div>
+            <div class="row mb-3">
+                <div class="col-md-4 fw-bold">Nombre:</div>
+                <div class="col-md-8"><?= htmlspecialchars($row['nombre'] ?? '') ?></div>
+            </div>
+            <div class="row mb-3">
+                <div class="col-md-4 fw-bold">Modelo:</div>
+                <div class="col-md-8"><?= htmlspecialchars($row['modelo'] ?? '') ?></div>
+            </div>
+            <div class="row mb-3">
+                <div class="col-md-4 fw-bold">Marca:</div>
+                <div class="col-md-8"><?= htmlspecialchars($row['marca'] ?? '') ?></div>
+            </div>
+            <div class="row mb-3">
+                <div class="col-md-4 fw-bold">Número de Serie:</div>
+                <div class="col-md-8"><?= htmlspecialchars($row['numero_serie'] ?? '') ?></div>
+            </div>
+            <div class="row mb-3">
+                <div class="col-md-4 fw-bold">Ebox MAC:</div>
+                <div class="col-md-8"><?= htmlspecialchars($row['ebox_mac'] ?? '') ?></div>
+            </div>
+            <div class="row mb-3">
+                <div class="col-md-4 fw-bold">Estado:</div>
+                <div class="col-md-8">
+                    <span class="badge bg-<?= 
+                        ($row['estado'] == 'Alta') ? 'success' : 
+                        (($row['estado'] == 'Baja') ? 'danger' : 'warning') ?>">
+                        <?= htmlspecialchars($row['estado'] ?? '') ?>
+                    </span>
+                </div>
+            </div>
+            <div class="row mb-3">
+                <div class="col-md-4 fw-bold">Fecha Creación:</div>
+                <div class="col-md-8"><?= date('d/m/Y H:i', strtotime($row['fecha_creacion'])) ?></div>
+            </div>
+            <div class="row">
+                <div class="col-md-4 fw-bold">Usuario:</div>
+                <div class="col-md-8"><?= htmlspecialchars($row['usuario'] ?? '') ?></div>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cerrar</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Modal Editar -->
+    <div class="modal fade" id="modalEditar<?= $row['idmac'] ?>" tabindex="-1" aria-labelledby="modalEditarLabel<?= $row['idmac'] ?>" aria-hidden="true">
+      <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+          <form method="post">
+            <div class="modal-header bg-primary text-white">
+              <h5 class="modal-title" id="modalEditarLabel<?= $row['idmac'] ?>">Editar Máquina</h5>
+              <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+            </div>
+            
+            <div class="modal-body">
+              <input type="hidden" name="accion" value="editar">
+              <input type="hidden" name="idmac" value="<?= $row['idmac'] ?>">
+              
+              <div class="mb-3">
+                <label for="nombreEditar<?= $row['idmac'] ?>" class="form-label">Nombre</label>
+                <input type="text" class="form-control" id="nombreEditar<?= $row['idmac'] ?>" 
+                       name="nombre" value="<?= htmlspecialchars($row['nombre'] ?? '') ?>" required>
+              </div>
+              
+              <div class="mb-3">
+                <label for="modeloEditar<?= $row['idmac'] ?>" class="form-label">Modelo</label>
+                <input type="text" class="form-control" id="modeloEditar<?= $row['idmac'] ?>" 
+                       name="modelo" value="<?= htmlspecialchars($row['modelo'] ?? '') ?>" required>
+              </div>
+              
+              <div class="mb-3">
+                <label for="marcaEditar<?= $row['idmac'] ?>" class="form-label">Marca</label>
+                <input type="text" class="form-control" id="marcaEditar<?= $row['idmac'] ?>" 
+                       name="marca" value="<?= htmlspecialchars($row['marca'] ?? '') ?>" required>
+              </div>
+              
+              <div class="mb-3">
+                <label for="serieEditar<?= $row['idmac'] ?>" class="form-label">Número de Serie</label>
+                <input type="text" class="form-control" id="serieEditar<?= $row['idmac'] ?>" 
+                       name="numero_serie" value="<?= htmlspecialchars($row['numero_serie'] ?? '') ?>" required>
+              </div>
+              
+              <div class="mb-3">
+                <label for="macEditar<?= $row['idmac'] ?>" class="form-label">Ebox MAC</label>
+                <input type="text" class="form-control" id="macEditar<?= $row['idmac'] ?>" 
+                       name="ebox_mac" value="<?= htmlspecialchars($row['ebox_mac'] ?? '') ?>">
+              </div>
+              
+              <div class="mb-3">
+                <label for="estadoEditar<?= $row['idmac'] ?>" class="form-label">Estado</label>
+                <select class="form-select" id="estadoEditar<?= $row['idmac'] ?>" name="estado" required>
+                  <option value="Alta" <?= ($row['estado'] ?? '') === 'Alta' ? 'selected' : '' ?>>Alta</option>
+                  <option value="Baja" <?= ($row['estado'] ?? '') === 'Baja' ? 'selected' : '' ?>>Baja</option>
+                  <option value="Proceso" <?= ($row['estado'] ?? '') === 'Proceso' ? 'selected' : '' ?>>Proceso</option>
+                </select>
+              </div>
+            </div>
+            
+            <div class="modal-footer">
+              <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+              <button type="submit" class="btn btn-primary">Guardar Cambios</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+
+    <!-- Modal Historial por máquina -->
+    <div class="modal fade" id="modalHistorial<?= $row['idmac'] ?>" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-lg modal-dialog-scrollable">
+            <div class="modal-content">
+                <div class="modal-header bg-secondary text-white">
+                    <h5 class="modal-title">Historial - Máquina: <?= htmlspecialchars($row['idmac'] ?? '') ?> - <?= htmlspecialchars($row['nombre'] ?? '') ?></h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+                </div>
+                <div class="modal-body p-0">
+                    <?php if (!empty($historialPorMaquina[$row['idmac']])): ?>
+                        <div class="table-responsive">
+                            <table class="table table-striped table-bordered mb-0">
+                                <thead class="table-light">
+                                    <tr>
+                                        <th width="80">ID</th>
+                                        <th>Descripción</th>
+                                        <th width="120">Usuario</th>
+                                        <th width="180">Fecha</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <?php foreach ($historialPorMaquina[$row['idmac']] as $hist): ?>
+                                        <tr>
+                                            <td><?= $hist['id'] ?></td>
+                                            <td><?= htmlspecialchars($hist['descripcion'] ?? '') ?></td>
+                                            <td><?= htmlspecialchars($hist['usuario'] ?? '') ?></td>
+                                            <td><?= date('d/m/Y H:i', strtotime($hist['fecha_cambio'])) ?></td>
+                                        </tr>
+                                    <?php endforeach; ?>
+                                </tbody>
+                            </table>
+                        </div>
+                    <?php else: ?>
+                        <div class="p-3 text-center">
+                            <div class="alert alert-info mb-0">No hay historial para esta máquina.</div>
+                        </div>
+                    <?php endif; ?>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cerrar</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    <?php endwhile; ?>
+<?php endif; ?>
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 </body>
