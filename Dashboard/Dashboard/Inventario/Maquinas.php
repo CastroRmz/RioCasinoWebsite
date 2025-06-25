@@ -93,8 +93,96 @@ if (isset($_GET["accion"]) && $_GET["accion"] === "eliminar" && isset($_GET["idm
     $stmt->close();
 }
 
-// Obtener máquinas para tabla
-$result = $conn->query("SELECT * FROM maquinas ORDER BY idmac DESC");
+// Obtener parámetros de búsqueda y filtros
+$busqueda = $_GET['busqueda'] ?? '';
+$filtro_estado = $_GET['filtro_estado'] ?? '';
+$filtro_marca = $_GET['filtro_marca'] ?? '';
+$filtro_modelo = $_GET['filtro_modelo'] ?? '';
+
+// Configuración de paginación
+$por_pagina = 10;
+$pagina_actual = isset($_GET['pagina']) ? max(1, intval($_GET['pagina'])) : 1;
+
+// Configuración de ordenación
+$orden = isset($_GET['orden']) ? $_GET['orden'] : 'idmac';
+$direccion = isset($_GET['dir']) ? $_GET['dir'] : 'DESC';
+
+// Validar campos de ordenación permitidos
+$campos_orden = ['idmac', 'nombre', 'modelo', 'marca', 'numero_serie', 'estado', 'fecha_creacion'];
+if (!in_array($orden, $campos_orden)) {
+    $orden = 'idmac';
+}
+$direccion = strtoupper($direccion) === 'ASC' ? 'ASC' : 'DESC';
+
+// Construir consulta SQL con filtros
+$sql = "SELECT * FROM maquinas WHERE 1=1";
+$params = [];
+$types = '';
+
+if (!empty($busqueda)) {
+    $sql .= " AND (nombre LIKE ? OR modelo LIKE ? OR marca LIKE ? OR numero_serie LIKE ? OR ebox_mac LIKE ?)";
+    $searchTerm = "%$busqueda%";
+    $params = array_merge($params, [$searchTerm, $searchTerm, $searchTerm, $searchTerm, $searchTerm]);
+    $types .= 'sssss';
+}
+
+if (!empty($filtro_estado)) {
+    $sql .= " AND estado = ?";
+    $params[] = $filtro_estado;
+    $types .= 's';
+}
+
+if (!empty($filtro_marca)) {
+    $sql .= " AND marca = ?";
+    $params[] = $filtro_marca;
+    $types .= 's';
+}
+
+if (!empty($filtro_modelo)) {
+    $sql .= " AND modelo = ?";
+    $params[] = $filtro_modelo;
+    $types .= 's';
+}
+
+// Contar total de registros para paginación
+$sql_count = "SELECT COUNT(*) AS total FROM maquinas WHERE 1=1";
+if (!empty($busqueda)) {
+    $sql_count .= " AND (nombre LIKE ? OR modelo LIKE ? OR marca LIKE ? OR numero_serie LIKE ? OR ebox_mac LIKE ?)";
+}
+if (!empty($filtro_estado)) {
+    $sql_count .= " AND estado = ?";
+}
+if (!empty($filtro_marca)) {
+    $sql_count .= " AND marca = ?";
+}
+if (!empty($filtro_modelo)) {
+    $sql_count .= " AND modelo = ?";
+}
+
+$stmt_count = $conn->prepare($sql_count);
+if (!empty($params)) {
+    $stmt_count->bind_param($types, ...$params);
+}
+$stmt_count->execute();
+$result_count = $stmt_count->get_result();
+$total_registros = $result_count->fetch_assoc()['total'];
+$total_paginas = ceil($total_registros / $por_pagina);
+$stmt_count->close();
+
+// Aplicar ordenación y límite para paginación
+$sql .= " ORDER BY $orden $direccion LIMIT " . (($pagina_actual - 1) * $por_pagina) . ", $por_pagina";
+
+// Preparar y ejecutar consulta
+$stmt = $conn->prepare($sql);
+if (!empty($params)) {
+    $stmt->bind_param($types, ...$params);
+}
+$stmt->execute();
+$result = $stmt->get_result();
+
+// Obtener opciones únicas para filtros
+$marcas = $conn->query("SELECT DISTINCT marca FROM maquinas WHERE marca IS NOT NULL AND marca != '' ORDER BY marca");
+$modelos = $conn->query("SELECT DISTINCT modelo FROM maquinas WHERE modelo IS NOT NULL AND modelo != '' ORDER BY modelo");
 
 // Preparar historial por máquina
 $historialPorMaquina = [];
@@ -124,97 +212,107 @@ if ($result->num_rows > 0) {
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" />
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
     <style>
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background-color: #f8f9fa;
-        }
-        .container {
-            max-width: 100%;
-            padding: 20px;
-        }
-        .table-responsive {
-            overflow-x: auto;
-            -webkit-overflow-scrolling: touch;
-            border-radius: 8px;
-            box-shadow: 0 0 10px rgba(0,0,0,0.1);
-            background-color: white;
-        }
-        .table {
-            width: 100%;
-            margin-bottom: 0;
-            color: #212529;
-            font-size: 14px;
-        }
-        .table th {
-            background-color: #343a40;
-            color: white;
-            font-weight: 500;
-            padding: 12px 15px;
-            vertical-align: middle;
-        }
-        .table td {
-            padding: 10px 15px;
-            vertical-align: middle;
-            border-top: 1px solid #e9ecef;
-        }
-        .table-striped tbody tr:nth-of-type(odd) {
-            background-color: rgba(0, 0, 0, 0.02);
-        }
-        .table-hover tbody tr:hover {
-            background-color: rgba(0, 0, 0, 0.05);
-        }
-        .badge {
-            font-size: 12px;
-            font-weight: 500;
-            padding: 5px 10px;
-            border-radius: 4px;
-        }
-        .bg-success {
-            background-color: #28a745 !important;
-        }
-        .bg-danger {
-            background-color: #dc3545 !important;
-        }
-        .bg-warning {
-            background-color: #ffc107 !important;
-            color: #212529;
-        }
-        .btn-sm {
-            padding: 5px 10px;
-            font-size: 12px;
-        }
-        .btn-group-sm .btn {
-            padding: 5px 10px;
-            font-size: 12px;
-        }
-        .page-title {
-            color: #343a40;
-            margin-bottom: 20px;
-            font-weight: 600;
-        }
-        .action-buttons {
+    body {
+        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        background-color: #f8f9fa;
+    }
+
+    .container {
+        max-width: 100%;
+        padding: 20px;
+    }
+
+    .filtros-container {
+        background-color: white;
+        padding: 20px;
+        border-radius: 10px;
+        box-shadow: 0 2px 12px rgba(0, 0, 0, 0.1);
+        margin-bottom: 25px;
+    }
+
+    .filtros-container .form-label {
+        font-weight: 600;
+        color: #495057;
+        margin-bottom: 5px;
+    }
+
+    .filtros-container .form-control,
+    .filtros-container .form-select {
+        font-size: 14px;
+        height: 40px;
+        border-radius: 6px;
+        border: 1px solid #ced4da;
+    }
+
+    .filtros-container .btn {
+        font-size: 14px;
+        padding: 10px 16px;
+        border-radius: 6px;
+        width: 100%;
+    }
+
+    .filtros-container .btn i {
+        margin-right: 5px;
+    }
+
+    .search-box {
+        position: relative;
+    }
+
+    .search-box .form-control {
+        padding-left: 38px;
+    }
+
+    .search-box i {
+        position: absolute;
+        left: 12px;
+        top: 11px;
+        font-size: 16px;
+        color: #6c757d;
+    }
+
+    .pagination .page-item.active .page-link {
+        background-color: #0d6efd;
+        border-color: #0d6efd;
+    }
+
+    .pagination .page-link {
+        color: #0d6efd;
+    }
+
+    .table th a {
+        text-decoration: none;
+        color: inherit;
+        display: block;
+    }
+
+    .table th a:hover {
+        color: #0d6efd;
+    }
+
+    @media (min-width: 768px) {
+        .filtros-container .col-md-2,
+        .filtros-container .col-md-4 {
             display: flex;
-            gap: 5px;
-            flex-wrap: wrap;
+            flex-direction: column;
+            justify-content: end;
         }
-        .modal-header {
-            padding: 15px 20px;
+    }
+
+    @media (max-width: 767px) {
+        .filtros-container .row > div {
+            width: 100%;
         }
-        .modal-title {
-            font-weight: 500;
+
+        .filtros-container .btn {
+            margin-top: 10px;
         }
-        .alert {
-            padding: 10px 15px;
-            margin-bottom: 20px;
-            border-radius: 4px;
+
+        .filtros-container .mt-2 {
+            margin-top: 10px !important;
         }
-        .historial-table {
-            background-color: #f8f9fa;
-        }
-        .historial-table th {
-            background-color: #e9ecef;
-        }
-    </style>
+    }
+</style>
 </head>
 <body>
 <div class="container py-4">
@@ -227,6 +325,65 @@ if ($result->num_rows > 0) {
         </div>
     <?php endif; ?>
 
+    <!-- Filtros y búsqueda -->
+    <div class="filtros-container mb-4">
+        <form method="get" class="row g-3">
+            <input type="hidden" name="orden" value="<?= htmlspecialchars($orden) ?>">
+            <input type="hidden" name="dir" value="<?= htmlspecialchars($direccion) ?>">
+            
+            <div class="col-md-4 search-box">
+                <i class="bi bi-search"></i>
+                <input type="text" class="form-control" name="busqueda" placeholder="Buscar..." 
+                       value="<?= htmlspecialchars($busqueda) ?>">
+            </div>
+
+            <div class="col-md-2">
+                <label class="filter-label">Estado</label>
+                <select name="filtro_estado" class="form-select">
+                    <option value="">Todos</option>
+                    <option value="Alta" <?= $filtro_estado === 'Alta' ? 'selected' : '' ?>>Alta</option>
+                    <option value="Baja" <?= $filtro_estado === 'Baja' ? 'selected' : '' ?>>Baja</option>
+                    <option value="Proceso" <?= $filtro_estado === 'Proceso' ? 'selected' : '' ?>>Proceso</option>
+                </select>
+            </div>
+
+            <div class="col-md-2">
+                <label class="filter-label">Marca</label>
+                <select name="filtro_marca" class="form-select">
+                    <option value="">Todas</option>
+                    <?php while ($marca = $marcas->fetch_assoc()): ?>
+                        <option value="<?= htmlspecialchars($marca['marca']) ?>" 
+                            <?= $filtro_marca === $marca['marca'] ? 'selected' : '' ?>>
+                            <?= htmlspecialchars($marca['marca']) ?>
+                        </option>
+                    <?php endwhile; ?>
+                </select>
+            </div>
+
+            <div class="col-md-2">
+                <label class="filter-label">Modelo</label>
+                <select name="filtro_modelo" class="form-select">
+                    <option value="">Todos</option>
+                    <?php while ($modelo = $modelos->fetch_assoc()): ?>
+                        <option value="<?= htmlspecialchars($modelo['modelo']) ?>" 
+                            <?= $filtro_modelo === $modelo['modelo'] ? 'selected' : '' ?>>
+                            <?= htmlspecialchars($modelo['modelo']) ?>
+                        </option>
+                    <?php endwhile; ?>
+                </select>
+            </div>
+
+            <div class="col-md-2">
+                <button type="submit" class="btn btn-primary filter-reset">
+                    <i class="bi bi-funnel"></i> Filtrar
+                </button>
+                <a href="?" class="btn btn-outline-secondary filter-reset mt-2">
+                    <i class="bi bi-arrow-counterclockwise"></i> Limpiar
+                </a>
+            </div>
+        </form>
+    </div>
+
     <div class="d-flex justify-content-between mb-4">
         <button class="btn btn-success" data-bs-toggle="modal" data-bs-target="#modalAgregar">
             <i class="bi bi-plus-circle"></i> Agregar Máquina
@@ -238,17 +395,45 @@ if ($result->num_rows > 0) {
 
     <!-- Tabla de máquinas -->
     <div class="table-responsive">
-        <table class="table table-striped table-hover table-bordered">
-            <thead>
+        <table class="table table-striped table-bordered bg-white">
+            <thead class = "table-dark">
                 <tr>
-                    <th width="50">ID</th>
-                    <th>Nombre</th>
-                    <th>Modelo</th>
-                    <th>Marca</th>
-                    <th>N° Serie</th>
+                    <th width="50">
+                        <a href="?<?= http_build_query(array_merge($_GET, ['orden' => 'idmac', 'dir' => $orden === 'idmac' && $direccion === 'DESC' ? 'ASC' : 'DESC'])) ?>">
+                            ID <?= $orden === 'idmac' ? ($direccion === 'ASC' ? '↑' : '↓') : '' ?>
+                        </a>
+                    </th>
+                    <th>
+                        <a href="?<?= http_build_query(array_merge($_GET, ['orden' => 'nombre', 'dir' => $orden === 'nombre' && $direccion === 'DESC' ? 'ASC' : 'DESC'])) ?>">
+                            Nombre <?= $orden === 'nombre' ? ($direccion === 'ASC' ? '↑' : '↓') : '' ?>
+                        </a>
+                    </th>
+                    <th>
+                        <a href="?<?= http_build_query(array_merge($_GET, ['orden' => 'modelo', 'dir' => $orden === 'modelo' && $direccion === 'DESC' ? 'ASC' : 'DESC'])) ?>">
+                            Modelo <?= $orden === 'modelo' ? ($direccion === 'ASC' ? '↑' : '↓') : '' ?>
+                        </a>
+                    </th>
+                    <th>
+                        <a href="?<?= http_build_query(array_merge($_GET, ['orden' => 'marca', 'dir' => $orden === 'marca' && $direccion === 'DESC' ? 'ASC' : 'DESC'])) ?>">
+                            Marca <?= $orden === 'marca' ? ($direccion === 'ASC' ? '↑' : '↓') : '' ?>
+                        </a>
+                    </th>
+                    <th>
+                        <a href="?<?= http_build_query(array_merge($_GET, ['orden' => 'numero_serie', 'dir' => $orden === 'numero_serie' && $direccion === 'DESC' ? 'ASC' : 'DESC'])) ?>">
+                            N° Serie <?= $orden === 'numero_serie' ? ($direccion === 'ASC' ? '↑' : '↓') : '' ?>
+                        </a>
+                    </th>
                     <th>Ebox MAC</th>
-                    <th width="100">Estado</th>
-                    <th width="120">Fecha Creación</th>
+                    <th width="100">
+                        <a href="?<?= http_build_query(array_merge($_GET, ['orden' => 'estado', 'dir' => $orden === 'estado' && $direccion === 'DESC' ? 'ASC' : 'DESC'])) ?>">
+                            Estado <?= $orden === 'estado' ? ($direccion === 'ASC' ? '↑' : '↓') : '' ?>
+                        </a>
+                    </th>
+                    <th width="120">
+                        <a href="?<?= http_build_query(array_merge($_GET, ['orden' => 'fecha_creacion', 'dir' => $orden === 'fecha_creacion' && $direccion === 'DESC' ? 'ASC' : 'DESC'])) ?>">
+                            Fecha Creación <?= $orden === 'fecha_creacion' ? ($direccion === 'ASC' ? '↑' : '↓') : '' ?>
+                        </a>
+                    </th>
                     <th width="100">Usuario</th>
                     <th width="220">Acciones</th>
                 </tr>
@@ -283,7 +468,7 @@ if ($result->num_rows > 0) {
                             <button class="btn btn-secondary btn-sm" data-bs-toggle="modal" data-bs-target="#modalHistorial<?= $row['idmac'] ?>">
                                 <i class="bi bi-clock-history"></i> Historial
                             </button>
-                            <a href="?accion=eliminar&idmac=<?= $row['idmac'] ?>" class="btn btn-danger btn-sm" onclick="return confirm('¿Estás seguro de eliminar esta máquina?');">
+                            <a href="?<?= http_build_query(array_merge($_GET, ['accion' => 'eliminar', 'idmac' => $row['idmac']])) ?>" class="btn btn-danger btn-sm" onclick="return confirm('¿Estás seguro de eliminar esta máquina?');">
                                 <i class="bi bi-trash"></i> Eliminar
                             </a>
                         </div>
@@ -292,12 +477,41 @@ if ($result->num_rows > 0) {
                 <?php endwhile; ?>
             <?php else: ?>
                 <tr>
-                    <td colspan="10" class="text-center py-4">No hay máquinas registradas</td>
+                    <td colspan="10" class="text-center py-4">No se encontraron máquinas con los filtros aplicados</td>
                 </tr>
             <?php endif; ?>
             </tbody>
         </table>
     </div>
+
+    <!-- Paginación -->
+    <?php if ($total_paginas > 1): ?>
+    <nav aria-label="Page navigation">
+        <ul class="pagination justify-content-center">
+            <li class="page-item <?= $pagina_actual <= 1 ? 'disabled' : '' ?>">
+                <a class="page-link" href="?<?= http_build_query(array_merge($_GET, ['pagina' => $pagina_actual - 1])) ?>" aria-label="Anterior">
+                    <span aria-hidden="true">&laquo;</span>
+                </a>
+            </li>
+            
+            <?php for ($i = 1; $i <= $total_paginas; $i++): ?>
+                <li class="page-item <?= $i == $pagina_actual ? 'active' : '' ?>">
+                    <a class="page-link" href="?<?= http_build_query(array_merge($_GET, ['pagina' => $i])) ?>"><?= $i ?></a>
+                </li>
+            <?php endfor; ?>
+            
+            <li class="page-item <?= $pagina_actual >= $total_paginas ? 'disabled' : '' ?>">
+                <a class="page-link" href="?<?= http_build_query(array_merge($_GET, ['pagina' => $pagina_actual + 1])) ?>" aria-label="Siguiente">
+                    <span aria-hidden="true">&raquo;</span>
+                </a>
+            </li>
+        </ul>
+    </nav>
+
+    <div class="text-center text-muted">
+        Mostrando <?= (($pagina_actual - 1) * $por_pagina) + 1 ?> a <?= min($pagina_actual * $por_pagina, $total_registros) ?> de <?= $total_registros ?> máquinas
+    </div>
+    <?php endif; ?>
 </div>
 
 <!-- Modal Agregar Máquina -->
