@@ -1,67 +1,102 @@
 <?php
+session_start();
+include("../../../conexion.php");
+
+if (!isset($_SESSION['usuario_id'])) {
+    header("Location: ../../../login.php");
+    exit();
+}
+
 $mysqli = new mysqli("localhost", "root", "", "rcdb");
 if ($mysqli->connect_error) {
-    die("Error de conexión: " . $mysqli->connect_error);
+    die(json_encode(['success' => false, 'message' => "Error de conexión: " . $mysqli->connect_error]));
 }
-
-$msg = "";
 
 // Configuración de paginación
-$registrosPorPagina = 10;
-$pagina = isset($_GET['pagina']) ? (int)$_GET['pagina'] : 1;
-$inicio = ($pagina - 1) * $registrosPorPagina;
+$por_pagina = 10;
+$pagina = isset($_GET['pagina']) ? max(1, intval($_GET['pagina'])) : 1;
+$inicio = ($pagina - 1) * $por_pagina;
 
-// Procesar formularios
-if ($_SERVER["REQUEST_METHOD"] === "POST") {
-    $accion = $_POST["accion"];
-
-    if ($accion === "agregar") {
-        $nombre = trim($_POST["nombre"]);
-        if (!empty($nombre)) {
-            $stmt = $mysqli->prepare("INSERT INTO cargos (nombre) VALUES (?)");
-            $stmt->bind_param("s", $nombre);
-            $msg = $stmt->execute() ? "Cargo agregado correctamente." : "Error al agregar cargo.";
-            $stmt->close();
-        } else {
-            $msg = "El nombre del cargo no puede estar vacío.";
+// Procesar AJAX requests
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ajax'])) {
+    header('Content-Type: application/json');
+    
+    if ($_POST['accion'] === 'editar') {
+        $id = intval($_POST['Cargo_id']);
+        $nombre = trim($_POST['nombre']);
+        
+        if (empty($nombre)) {
+            echo json_encode(['success' => false, 'message' => "El nombre del cargo no puede estar vacío."]);
+            exit();
         }
+        
+        $stmt = $mysqli->prepare("UPDATE cargos SET nombre = ? WHERE Cargo_id = ?");
+        $stmt->bind_param("si", $nombre, $id);
+        
+        if ($stmt->execute()) {
+            echo json_encode(['success' => true, 'message' => "Cargo actualizado correctamente."]);
+        } else {
+            echo json_encode(['success' => false, 'message' => "Error al actualizar el cargo: " . $stmt->error]);
+        }
+        $stmt->close();
+        exit();
     }
-
-    if ($accion === "editar") {
-        $Cargo_id = intval($_POST["Cargo_id"]);
-        $nombre = trim($_POST["nombre"]);
-        if (!empty($nombre)) {
-            $stmt = $mysqli->prepare("UPDATE cargos SET nombre = ? WHERE Cargo_id = ?");
-            $stmt->bind_param("si", $nombre, $Cargo_id);
-            $msg = $stmt->execute() ? "Cargo actualizado correctamente." : "Error al actualizar el cargo.";
-            $stmt->close();
-        } else {
-            $msg = "El nombre del cargo no puede estar vacío.";
+    
+    if ($_POST['accion'] === 'agregar') {
+        $nombre = trim($_POST['nombre']);
+        
+        if (empty($nombre)) {
+            echo json_encode(['success' => false, 'message' => "El nombre del cargo no puede estar vacío."]);
+            exit();
         }
+        
+        $stmt = $mysqli->prepare("INSERT INTO cargos (nombre) VALUES (?)");
+        $stmt->bind_param("s", $nombre);
+        
+        if ($stmt->execute()) {
+            echo json_encode(['success' => true, 'message' => "Cargo agregado correctamente.", 'refresh' => true]);
+        } else {
+            echo json_encode(['success' => false, 'message' => "Error al agregar cargo: " . $stmt->error]);
+        }
+        $stmt->close();
+        exit();
     }
 }
 
-// Eliminar
+// Eliminar (vía GET)
 if (isset($_GET["accion"]) && $_GET["accion"] === "eliminar" && isset($_GET["Cargo_id"])) {
-    $Cargo_id = intval($_GET["Cargo_id"]);
-    $stmt = $mysqli->prepare("DELETE FROM cargos WHERE Cargo_id = ?");
-    $stmt->bind_param("i", $Cargo_id);
-    $msg = $stmt->execute() ? "Cargo eliminado correctamente." : "Error al eliminar el cargo.";
-    $stmt->close();
+    $id = intval($_GET["Cargo_id"]);
+    
+    // Verificar si el cargo está en uso
+    $check = $mysqli->prepare("SELECT COUNT(*) FROM empleados WHERE cargoID = ?");
+    $check->bind_param("i", $id);
+    $check->execute();
+    $check->bind_result($en_uso);
+    $check->fetch();
+    $check->close();
+    
+    if ($en_uso > 0) {
+        $msg = "No se puede eliminar el cargo porque está asignado a empleados.";
+    } else {
+        $stmt = $mysqli->prepare("DELETE FROM cargos WHERE Cargo_id = ?");
+        $stmt->bind_param("i", $id);
+        if ($stmt->execute()) {
+            $msg = "Cargo eliminado correctamente.";
+        } else {
+            $msg = "Error al eliminar el cargo: " . $stmt->error;
+        }
+        $stmt->close();
+    }
+    header("Location: Cargos.php?pagina=$pagina&msg=" . urlencode($msg));
+    exit();
 }
 
-// Obtener el total de cargos para paginación
-$totalRegistros = $mysqli->query("SELECT COUNT(*) as total FROM cargos")->fetch_assoc()['total'];
-$totalPaginas = ceil($totalRegistros / $registrosPorPagina);
+// Obtener datos para la vista
+$total_query = $mysqli->query("SELECT COUNT(*) AS total FROM cargos");
+$total = $total_query->fetch_assoc()['total'];
+$paginas = ceil($total / $por_pagina);
 
-// Obtener cargos con paginación y orden
-$orden = isset($_GET['orden']) ? $_GET['orden'] : 'Cargo_id';
-$direccion = isset($_GET['dir']) ? $_GET['dir'] : 'DESC';
-$ordenValido = in_array($orden, ['Cargo_id', 'nombre']) ? $orden : 'Cargo_id';
-$direccionValida = $direccion === 'ASC' ? 'ASC' : 'DESC';
-
-$query = "SELECT * FROM cargos ORDER BY $ordenValido $direccionValida LIMIT $inicio, $registrosPorPagina";
-$cargos = $mysqli->query($query);
+$cargos = $mysqli->query("SELECT * FROM cargos ORDER BY Cargo_id DESC LIMIT $inicio, $por_pagina");
 ?>
 
 <!DOCTYPE html>
@@ -70,28 +105,29 @@ $cargos = $mysqli->query($query);
     <meta charset="UTF-8">
     <title>Gestión de Cargos</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
     <style>
-        .sortable:hover {
-            cursor: pointer;
-            background-color: #f8f9fa;
-        }
-        .sort-icon {
-            margin-left: 5px;
-        }
+        .table-responsive { overflow-x: auto; }
+        .btn-sm { padding: 0.25rem 0.5rem; font-size: 0.875rem; }
+        #toast-container { position: fixed; top: 20px; right: 20px; z-index: 1100; }
+        .spinner-btn { display: none; }
+        .is-loading .spinner-btn { display: inline-block; }
+        .is-loading .btn-text { display: none; }
     </style>
 </head>
 <body class="bg-light">
 <div class="container mt-5">
     <h2 class="mb-4">Gestión de Cargos</h2>
 
-    <?php if ($msg): ?>
+    <?php if (isset($_GET['msg'])): ?>
         <div class="alert alert-info alert-dismissible fade show">
-            <?= htmlspecialchars($msg) ?>
-            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            <?= htmlspecialchars(urldecode($_GET['msg'])) ?>
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
         </div>
     <?php endif; ?>
 
-    <!-- Botón para agregar -->
+    <div id="toast-container"></div>
+
     <button class="btn btn-success mb-3" data-bs-toggle="modal" data-bs-target="#modalAgregar">
         <i class="bi bi-plus-circle"></i> Agregar Cargo
     </button>
@@ -99,44 +135,31 @@ $cargos = $mysqli->query($query);
     <div class="table-responsive">
         <table class="table table-bordered table-hover">
             <thead class="table-dark">
-            <tr>
-                <th class="sortable" onclick="ordenarTabla('Cargo_id')">
-                    ID 
-                    <?php if ($ordenValido === 'Cargo_id'): ?>
-                        <i class="bi bi-arrow-<?= $direccionValida === 'ASC' ? 'up' : 'down' ?> sort-icon"></i>
-                    <?php endif; ?>
-                </th>
-                <th class="sortable" onclick="ordenarTabla('nombre')">
-                    Nombre 
-                    <?php if ($ordenValido === 'nombre'): ?>
-                        <i class="bi bi-arrow-<?= $direccionValida === 'ASC' ? 'up' : 'down' ?> sort-icon"></i>
-                    <?php endif; ?>
-                </th>
-                <th>Acciones</th>
-            </tr>
+                <tr>
+                    <th>ID</th>
+                    <th>Nombre</th>
+                    <th>Acciones</th>
+                </tr>
             </thead>
             <tbody>
-            <?php while ($cargo = $cargos->fetch_assoc()): ?>
-                <tr>
+                <?php while ($cargo = $cargos->fetch_assoc()): ?>
+                <tr id="row-<?= $cargo['Cargo_id'] ?>">
                     <td><?= $cargo['Cargo_id'] ?></td>
-                    <td><?= htmlspecialchars($cargo['nombre']) ?></td>
+                    <td class="nombre-cargo"><?= htmlspecialchars($cargo['nombre']) ?></td>
                     <td>
-                        <div class="btn-group" role="group">
-                            <!-- Ver -->
-                            <button class="btn btn-info btn-sm" data-bs-toggle="modal" data-bs-target="#modalVer<?= $cargo['Cargo_id'] ?>">
-                                <i class="bi bi-eye"></i> Ver
-                            </button>
-                            <!-- Editar -->
-                            <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#modalEditar<?= $cargo['Cargo_id'] ?>">
-                                <i class="bi bi-pencil"></i> Editar
-                            </button>
-                            <!-- Eliminar -->
-                            <a href="?accion=eliminar&Cargo_id=<?= $cargo['Cargo_id'] ?>&pagina=<?= $pagina ?>&orden=<?= $ordenValido ?>&dir=<?= $direccionValida ?>" 
-                               class="btn btn-danger btn-sm" 
-                               onclick="return confirm('¿Está seguro de eliminar este cargo?')">
-                                <i class="bi bi-trash"></i> Eliminar
-                            </a>
-                        </div>
+                        <button class="btn btn-info btn-sm" data-bs-toggle="modal" data-bs-target="#modalVer<?= $cargo['Cargo_id'] ?>">
+                            <i class="bi bi-eye"></i> Ver
+                        </button>
+                        <button class="btn btn-primary btn-sm btn-editar" 
+                                data-id="<?= $cargo['Cargo_id'] ?>" 
+                                data-nombre="<?= htmlspecialchars($cargo['nombre']) ?>">
+                            <i class="bi bi-pencil"></i> Editar
+                        </button>
+                        <a href="?accion=eliminar&Cargo_id=<?= $cargo['Cargo_id'] ?>&pagina=<?= $pagina ?>" 
+                           class="btn btn-danger btn-sm" 
+                           onclick="return confirm('¿Estás seguro de eliminar este cargo?')">
+                            <i class="bi bi-trash"></i> Eliminar
+                        </a>
                     </td>
                 </tr>
 
@@ -145,16 +168,16 @@ $cargos = $mysqli->query($query);
                     <div class="modal-dialog">
                         <div class="modal-content">
                             <div class="modal-header bg-info text-white">
-                                <h5 class="modal-title">Detalles del Cargo</h5>
+                                <h5 class="modal-title">Ver Cargo</h5>
                                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                             </div>
                             <div class="modal-body">
                                 <div class="mb-3">
-                                    <label class="form-label fw-bold">ID:</label>
+                                    <label class="form-label"><strong>ID:</strong></label>
                                     <p><?= $cargo['Cargo_id'] ?></p>
                                 </div>
                                 <div class="mb-3">
-                                    <label class="form-label fw-bold">Nombre:</label>
+                                    <label class="form-label"><strong>Nombre:</strong></label>
                                     <p><?= htmlspecialchars($cargo['nombre']) ?></p>
                                 </div>
                             </div>
@@ -164,55 +187,51 @@ $cargos = $mysqli->query($query);
                         </div>
                     </div>
                 </div>
-
-                <!-- Modal Editar -->
-                <div class="modal fade" id="modalEditar<?= $cargo['Cargo_id'] ?>" tabindex="-1" aria-hidden="true">
-                    <div class="modal-dialog">
-                        <form method="post" class="modal-content">
-                            <div class="modal-header bg-primary text-white">
-                                <h5 class="modal-title">Editar Cargo</h5>
-                                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-                            </div>
-                            <div class="modal-body">
-                                <input type="hidden" name="accion" value="editar">
-                                <input type="hidden" name="Cargo_id" value="<?= $cargo['Cargo_id'] ?>">
-                                <div class="mb-3">
-                                    <label class="form-label fw-bold">Nombre del cargo:</label>
-                                    <input type="text" name="nombre" class="form-control" value="<?= htmlspecialchars($cargo['nombre']) ?>" required>
-                                </div>
-                            </div>
-                            <div class="modal-footer">
-                                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
-                                <button type="submit" class="btn btn-primary">Guardar Cambios</button>
-                            </div>
-                        </form>
-                    </div>
-                </div>
-            <?php endwhile; ?>
+                <?php endwhile; ?>
             </tbody>
         </table>
     </div>
 
     <!-- Paginación -->
     <nav aria-label="Page navigation">
-        <ul class="pagination justify-content-center">
+        <ul class="pagination justify-content-center mt-3">
             <?php if ($pagina > 1): ?>
                 <li class="page-item">
-                    <a class="page-link" href="?pagina=<?= $pagina - 1 ?>&orden=<?= $ordenValido ?>&dir=<?= $direccionValida ?>" aria-label="Anterior">
+                    <a class="page-link" href="?pagina=<?= $pagina - 1 ?>" aria-label="Previous">
                         <span aria-hidden="true">&laquo;</span>
                     </a>
                 </li>
             <?php endif; ?>
 
-            <?php for ($i = 1; $i <= $totalPaginas; $i++): ?>
+            <?php
+            $rango = 2;
+            $inicio_rango = max(1, $pagina - $rango);
+            $fin_rango = min($paginas, $pagina + $rango);
+            
+            if ($inicio_rango > 1) {
+                echo '<li class="page-item"><a class="page-link" href="?pagina=1">1</a></li>';
+                if ($inicio_rango > 2) {
+                    echo '<li class="page-item disabled"><span class="page-link">...</span></li>';
+                }
+            }
+            
+            for ($i = $inicio_rango; $i <= $fin_rango; $i++): ?>
                 <li class="page-item <?= $i == $pagina ? 'active' : '' ?>">
-                    <a class="page-link" href="?pagina=<?= $i ?>&orden=<?= $ordenValido ?>&dir=<?= $direccionValida ?>"><?= $i ?></a>
+                    <a class="page-link" href="?pagina=<?= $i ?>"><?= $i ?></a>
                 </li>
-            <?php endfor; ?>
+            <?php endfor;
+            
+            if ($fin_rango < $paginas) {
+                if ($fin_rango < $paginas - 1) {
+                    echo '<li class="page-item disabled"><span class="page-link">...</span></li>';
+                }
+                echo '<li class="page-item"><a class="page-link" href="?pagina='.$paginas.'">'.$paginas.'</a></li>';
+            }
+            ?>
 
-            <?php if ($pagina < $totalPaginas): ?>
+            <?php if ($pagina < $paginas): ?>
                 <li class="page-item">
-                    <a class="page-link" href="?pagina=<?= $pagina + 1 ?>&orden=<?= $ordenValido ?>&dir=<?= $direccionValida ?>" aria-label="Siguiente">
+                    <a class="page-link" href="?pagina=<?= $pagina + 1 ?>" aria-label="Next">
                         <span aria-hidden="true">&raquo;</span>
                     </a>
                 </li>
@@ -221,42 +240,172 @@ $cargos = $mysqli->query($query);
     </nav>
 </div>
 
-<!-- Modal Agregar -->
-<div class="modal fade" id="modalAgregar" tabindex="-1" aria-hidden="true">
+<!-- Modal Editar (único para todos) -->
+<div class="modal fade" id="modalEditar" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog">
-        <form method="post" class="modal-content">
-            <div class="modal-header bg-success text-white">
-                <h5 class="modal-title">Agregar Nuevo Cargo</h5>
+        <form id="formEditar" class="modal-content">
+            <div class="modal-header bg-primary text-white">
+                <h5 class="modal-title">Editar Cargo</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
             <div class="modal-body">
+                <input type="hidden" name="ajax" value="1">
+                <input type="hidden" name="accion" value="editar">
+                <input type="hidden" id="editarCargoId" name="Cargo_id" value="">
+                <div class="mb-3">
+                    <label class="form-label">Nombre del cargo:</label>
+                    <input type="text" id="editarNombre" name="nombre" class="form-control" required>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                <button type="submit" class="btn btn-primary">
+                    <span class="spinner-border spinner-border-sm spinner-btn" role="status" aria-hidden="true"></span>
+                    <span class="btn-text">Guardar Cambios</span>
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Modal Agregar -->
+<div class="modal fade" id="modalAgregar" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <form id="formAgregar" class="modal-content">
+            <div class="modal-header bg-success text-white">
+                <h5 class="modal-title">Agregar Cargo</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" name="ajax" value="1">
                 <input type="hidden" name="accion" value="agregar">
                 <div class="mb-3">
-                    <label class="form-label fw-bold">Nombre del cargo:</label>
+                    <label class="form-label">Nombre del cargo:</label>
                     <input type="text" name="nombre" class="form-control" required>
                 </div>
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
-                <button type="submit" class="btn btn-success">Agregar</button>
+                <button type="submit" class="btn btn-success">
+                    <span class="spinner-border spinner-border-sm spinner-btn" role="status" aria-hidden="true"></span>
+                    <span class="btn-text">Agregar</span>
+                </button>
             </div>
         </form>
     </div>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.min.js"></script>
 <script>
-    function ordenarTabla(columna) {
-        const urlParams = new URLSearchParams(window.location.search);
-        let dir = 'ASC';
+// Función para mostrar notificaciones
+function showToast(message, type = 'success') {
+    const toast = document.createElement('div');
+    toast.className = `alert alert-${type} alert-dismissible fade show`;
+    toast.innerHTML = `
+        ${message}
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+    `;
+    const container = document.getElementById('toast-container');
+    container.appendChild(toast);
+    
+    // Eliminar después de 5 segundos
+    setTimeout(() => {
+        toast.remove();
+    }, 5000);
+}
+
+// Manejar el modal de edición
+document.querySelectorAll('.btn-editar').forEach(btn => {
+    btn.addEventListener('click', function() {
+        const id = this.getAttribute('data-id');
+        const nombre = this.getAttribute('data-nombre');
         
-        if (urlParams.get('orden') === columna) {
-            dir = urlParams.get('dir') === 'ASC' ? 'DESC' : 'ASC';
+        document.getElementById('editarCargoId').value = id;
+        document.getElementById('editarNombre').value = nombre;
+        
+        const modal = new bootstrap.Modal(document.getElementById('modalEditar'));
+        modal.show();
+    });
+});
+
+// Envío del formulario de edición con AJAX
+document.getElementById('formEditar').addEventListener('submit', function(e) {
+    e.preventDefault();
+    const form = this;
+    const submitBtn = form.querySelector('button[type="submit"]');
+    
+    // Mostrar spinner y deshabilitar botón
+    submitBtn.classList.add('is-loading');
+    submitBtn.disabled = true;
+    
+    fetch('Cargos.php', {
+        method: 'POST',
+        body: new FormData(form)
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            showToast(data.message);
+            // Actualizar la fila en la tabla sin recargar
+            const row = document.querySelector(`#row-${form.Cargo_id.value}`);
+            if (row) {
+                row.querySelector('.nombre-cargo').textContent = form.nombre.value;
+            }
+            // Cerrar el modal
+            bootstrap.Modal.getInstance(document.getElementById('modalEditar')).hide();
+        } else {
+            showToast(data.message, 'danger');
         }
-        
-        window.location.href = `?pagina=1&orden=${columna}&dir=${dir}`;
-    }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        showToast('Error al procesar la solicitud', 'danger');
+    })
+    .finally(() => {
+        submitBtn.classList.remove('is-loading');
+        submitBtn.disabled = false;
+    });
+});
+
+// Envío del formulario de agregar con AJAX
+document.getElementById('formAgregar').addEventListener('submit', function(e) {
+    e.preventDefault();
+    const form = this;
+    const submitBtn = form.querySelector('button[type="submit"]');
+    
+    // Mostrar spinner y deshabilitar botón
+    submitBtn.classList.add('is-loading');
+    submitBtn.disabled = true;
+    
+    fetch('Cargos.php', {
+        method: 'POST',
+        body: new FormData(form)
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            showToast(data.message);
+            if (data.refresh) {
+                // Recargar la página para mostrar el nuevo cargo
+                setTimeout(() => window.location.reload(), 1000);
+            }
+            // Cerrar el modal
+            bootstrap.Modal.getInstance(document.getElementById('modalAgregar')).hide();
+            // Resetear el formulario
+            form.reset();
+        } else {
+            showToast(data.message, 'danger');
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        showToast('Error al procesar la solicitud', 'danger');
+    })
+    .finally(() => {
+        submitBtn.classList.remove('is-loading');
+        submitBtn.disabled = false;
+    });
+});
 </script>
 </body>
 </html>
