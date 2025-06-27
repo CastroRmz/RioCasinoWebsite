@@ -313,7 +313,7 @@ if ($result && $result->num_rows > 0) {
 <body>
     <!-- Header -->
     <div class="header text-center">
-        <h1><i class="fas fa-map-marked-alt me-2"></i>Layouts del Casino</h1>
+        <h1><i class="fas fa-map-marked-alt me-2"></i>Layout del Casino</h1>
         <p class="lead mb-0">Gestión completa de planos del establecimiento</p>
     </div>
 
