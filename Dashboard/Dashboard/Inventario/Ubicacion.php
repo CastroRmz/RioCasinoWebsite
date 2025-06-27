@@ -144,7 +144,7 @@ if ($result && $result->num_rows > 0) {
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <title>Mapas del Casino</title>
+    <title>Layout del Casino</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
@@ -313,7 +313,7 @@ if ($result && $result->num_rows > 0) {
 <body>
     <!-- Header -->
     <div class="header text-center">
-        <h1><i class="fas fa-map-marked-alt me-2"></i>Mapas del Casino</h1>
+        <h1><i class="fas fa-map-marked-alt me-2"></i>Layouts del Casino</h1>
         <p class="lead mb-0">Gestión completa de planos del establecimiento</p>
     </div>
 
@@ -330,8 +330,8 @@ if ($result && $result->num_rows > 0) {
             <div class="text-center py-5">
                 <div class="alert alert-warning py-4">
                     <i class="fas fa-exclamation-circle fa-2x mb-3"></i>
-                    <h4>No hay mapas registrados</h4>
-                    <p class="mb-0">Use el botón + para subir el primer mapa</p>
+                    <h4>No hay Layout registrados</h4>
+                    <p class="mb-0">Use el botón + para subir el primer layout</p>
                 </div>
             </div>
         <?php else: ?>
@@ -402,7 +402,7 @@ if ($result && $result->num_rows > 0) {
         <div class="modal-dialog">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h5 class="modal-title" id="uploadModalLabel"><i class="fas fa-upload me-2"></i>Subir Nuevo Mapa</h5>
+                    <h5 class="modal-title" id="uploadModalLabel"><i class="fas fa-upload me-2"></i>Subir Nuevo Layout</h5>
                     <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
                 <div class="modal-body">
