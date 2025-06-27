@@ -108,17 +108,60 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST["accion"])) {
             $stmt->close();
         }
     } elseif ($_POST["accion"] == "actualizar_ticket" && $rol == 'SuperAdmin') {
-        // Actualizar ticket
-        $ticket_id = isset($_POST["ticket_id"]) ? intval($_POST["ticket_id"]) : 0;
-        $nuevo_estado = isset($_POST["nuevo_estado"]) ? $_POST["nuevo_estado"] : '';
-        $comentarios = isset($_POST["comentarios"]) ? trim($_POST["comentarios"]) : '';
-        $asignado_a = isset($_POST["asignado_a"]) ? intval($_POST["asignado_a"]) : 0;
+        // Actualizar ticket completo
+        $ticket_id = intval($_POST["ticket_id"]);
+        $nuevo_estado = $_POST["nuevo_estado"];
+        $comentarios = trim($_POST["comentarios"]);
+        $asignado_a = intval($_POST["asignado_a"]);
+        $asunto = trim($_POST["asunto"]);
+        $descripcion = trim($_POST["descripcion"]);
+        $tipo_equipo = $_POST["tipo_equipo"];
+        $empleado_id = intval($_POST["empleado_id"]);
+        $numero_serie = trim($_POST["numero_serie"]);
+        $departamento_id = intval($_POST["departamento_id"]);
         
-        $stmt = $conn->prepare("UPDATE tickets SET estado = ?, comentarios = ?, asignado_a = ?, 
-                               fecha_proceso = IF(? = 'En proceso', NOW(), fecha_proceso),
-                               fecha_cierre = IF(? = 'Cerrado', NOW(), fecha_cierre)
-                               WHERE id = ?");
-        $stmt->bind_param("ssisii", $nuevo_estado, $comentarios, $asignado_a, $nuevo_estado, $nuevo_estado, $ticket_id);
+        // Obtener nombre del departamento para actualizar ubicación
+        $ubicacion = '';
+        if ($departamento_id) {
+            $stmt_dep = $conn->prepare("SELECT nombre FROM departamentos WHERE departamento_id = ?");
+            $stmt_dep->bind_param("i", $departamento_id);
+            $stmt_dep->execute();
+            $result_dep = $stmt_dep->get_result();
+            if ($dep = $result_dep->fetch_assoc()) {
+                $ubicacion = $dep['nombre'];
+            }
+            $stmt_dep->close();
+        }
+        
+        $stmt = $conn->prepare("UPDATE tickets SET 
+            estado = ?, 
+            comentarios = ?, 
+            asignado_a = ?,
+            asunto = ?,
+            descripcion = ?,
+            tipo_equipo = ?,
+            empleado_id = ?,
+            numero_serie = ?,
+            departamento_id = ?,
+            ubicacion = ?,
+            fecha_proceso = IF(? = 'En proceso', IF(fecha_proceso IS NULL, NOW(), fecha_proceso), fecha_proceso),
+            fecha_cierre = IF(? = 'Cerrado', IF(fecha_cierre IS NULL, NOW(), fecha_cierre), fecha_cierre)
+            WHERE id = ?");
+        
+        $stmt->bind_param("ssissssissii", 
+            $nuevo_estado, 
+            $comentarios, 
+            $asignado_a,
+            $asunto,
+            $descripcion,
+            $tipo_equipo,
+            $empleado_id,
+            $numero_serie,
+            $departamento_id,
+            $ubicacion,
+            $nuevo_estado,
+            $nuevo_estado,
+            $ticket_id);
         
         if ($stmt->execute()) {
             $mensaje = "Ticket actualizado correctamente.";
@@ -382,7 +425,13 @@ $tickets = $conn->query("
                       data-ticket-id="<?php echo $ticket['id']; ?>"
                       data-estado-actual="<?php echo $ticket['estado']; ?>"
                       data-asignado-actual="<?php echo isset($ticket['asignado_a']) ? $ticket['asignado_a'] : ''; ?>"
-                      data-comentarios-actual="<?php echo isset($ticket['comentarios']) ? htmlspecialchars($ticket['comentarios']) : ''; ?>">
+                      data-comentarios-actual="<?php echo isset($ticket['comentarios']) ? htmlspecialchars($ticket['comentarios']) : ''; ?>"
+                      data-asunto-actual="<?php echo htmlspecialchars($ticket['asunto']); ?>"
+                      data-descripcion-actual="<?php echo htmlspecialchars($ticket['descripcion']); ?>"
+                      data-tipo-equipo-actual="<?php echo $ticket['tipo_equipo']; ?>"
+                      data-numero-serie-actual="<?php echo htmlspecialchars($ticket['numero_serie']); ?>"
+                      data-departamento-actual="<?php echo $ticket['departamento_id']; ?>"
+                      data-empleado-actual="<?php echo $ticket['empleado_id']; ?>">
                 <i class="bi bi-pencil"></i> Editar
               </button>
               
@@ -544,7 +593,7 @@ $tickets = $conn->query("
 <!-- Modal para editar ticket (Solo SuperAdmin) -->
 <?php if ($rol == 'SuperAdmin'): ?>
 <div class="modal fade" id="modalEditarTicket" tabindex="-1" aria-hidden="true">
-  <div class="modal-dialog">
+  <div class="modal-dialog modal-lg">
     <form method="post" class="modal-content">
       <div class="modal-header bg-primary text-white">
         <h5 class="modal-title">Editar Ticket</h5>
@@ -555,31 +604,122 @@ $tickets = $conn->query("
         <input type="hidden" name="accion" value="actualizar_ticket">
         <input type="hidden" name="ticket_id" id="editarTicketId" value="">
 
-        <div class="mb-3">
-          <label class="form-label fw-bold">Estado del Ticket</label>
-          <select name="nuevo_estado" id="nuevoEstado" class="form-select">
-            <option value="Abierto">Abierto</option>
-            <option value="En proceso">En proceso</option>
-            <option value="Cerrado">Cerrado</option>
-          </select>
+        <div class="row mb-3">
+          <div class="col-md-6">
+            <label class="form-label fw-bold required-field">Tipo de Equipo</label>
+            <select name="tipo_equipo" id="editarTipoEquipo" class="form-select" required onchange="toggleCamposEquipoEdit()">
+              <option value="maquina_juego">Máquina de Juego</option>
+              <option value="impresora">Impresora</option>
+              <option value="computadora">Computadora</option>
+              <option value="laptop">Laptop</option>
+              <option value="otro">Otro</option>
+            </select>
+          </div>
+          
+          <div class="col-md-6">
+            <label class="form-label fw-bold required-field">Asunto</label>
+            <input type="text" name="asunto" id="editarAsunto" class="form-control" required>
+          </div>
+        </div>
+
+        <div class="row mb-3">
+          <div class="col-md-6">
+            <label class="form-label fw-bold required-field">Departamento</label>
+            <select name="departamento_id" id="editarDepartamento" class="form-select" required>
+              <?php 
+              $departamentos->data_seek(0);
+              while ($dep = $departamentos->fetch_assoc()): ?>
+                <option value="<?php echo $dep['departamento_id']; ?>">
+                  <?php echo htmlspecialchars($dep['nombre']); ?>
+                </option>
+              <?php endwhile; ?>
+            </select>
+          </div>
+          
+          <div class="col-md-6">
+            <label class="form-label fw-bold">Estado del Ticket</label>
+            <select name="nuevo_estado" id="editarEstado" class="form-select">
+              <option value="Abierto">Abierto</option>
+              <option value="En proceso">En proceso</option>
+              <option value="Cerrado">Cerrado</option>
+            </select>
+          </div>
+        </div>
+
+        <div id="editarCamposMaquina" class="row mb-3" style="display: none;">
+          <div class="col-md-12">
+            <label class="form-label fw-bold required-field">Número de Serie/MAC</label>
+            <div class="input-group">
+              <input type="text" name="numero_serie" id="editarNumeroSerie" class="form-control">
+              <button type="button" class="btn btn-outline-primary" onclick="iniciarEscaneo('editarNumeroSerie')">
+                <i class="bi bi-upc-scan"></i> Escanear
+              </button>
+            </div>
+            <div id="editarSerieValida" class="info-maquina mt-2" style="display: none;">
+              <i class="bi bi-check-circle text-success"></i> <span id="editarValidoText"></span>
+            </div>
+            <div id="editarSerieInvalida" class="text-danger mt-2" style="display: none;">
+              <i class="bi bi-exclamation-circle"></i> Número de serie no registrado
+            </div>
+          </div>
+        </div>
+
+        <div class="row mb-3">
+          <div class="col-md-6">
+            <label class="form-label fw-bold required-field">Seleccionar Empleado</label>
+            <select name="empleado_id" id="editarEmpleadoSelect" class="form-select" required onchange="actualizarDatosEmpleadoEdit()">
+              <option value="">-- Selecciona un empleado --</option>
+              <?php 
+              $empleados->data_seek(0);
+              while ($e = $empleados->fetch_assoc()): ?>
+                <option 
+                  value="<?php echo $e['empleado_id']; ?>" 
+                  data-nombre="<?php echo htmlspecialchars($e['nombre']); ?>"
+                  data-cargo="<?php echo htmlspecialchars($e['cargo']); ?>"
+                  data-area="<?php echo htmlspecialchars($e['area']); ?>"
+                >
+                  <?php echo htmlspecialchars($e['nombre']); ?> (<?php echo htmlspecialchars($e['cargo']); ?>)
+                </option>
+              <?php endwhile; ?>
+            </select>
+          </div>
+          
+          <div class="col-md-6">
+            <label class="form-label fw-bold">Asignar a</label>
+            <select name="asignado_a" id="editarAsignadoA" class="form-select">
+              <option value="0">-- Sin asignar --</option>
+              <?php 
+              $administradores->data_seek(0);
+              while ($admin = $administradores->fetch_assoc()): ?>
+                <option value="<?php echo $admin['Usuario_id']; ?>"><?php echo htmlspecialchars($admin['usuario']); ?></option>
+              <?php endwhile; ?>
+            </select>
+          </div>
+        </div>
+
+        <div id="editarDatosEmpleado" class="datos-empleado mb-3" style="display: none;">
+          <h6 class="mb-2">Información del Solicitante</h6>
+          <div class="row">
+            <div class="col-md-4">
+              <p><strong>Nombre:</strong> <span id="editarNombreEmp" class="text-primary"></span></p>
+            </div>
+            <div class="col-md-4">
+              <p><strong>Cargo:</strong> <span id="editarCargoEmp"></span></p>
+            </div>
+            <div class="col-md-4">
+              <p><strong>Área:</strong> <span id="editarAreaEmp"></span></p>
+            </div>
+          </div>
         </div>
 
         <div class="mb-3">
-          <label class="form-label fw-bold">Asignar a</label>
-          <select name="asignado_a" id="asignadoA" class="form-select">
-            <option value="0">-- Sin asignar --</option>
-            <?php 
-            $administradores->data_seek(0);
-            while ($admin = $administradores->fetch_assoc()): ?>
-              <option value="<?php echo $admin['Usuario_id']; ?>"><?php echo htmlspecialchars($admin['usuario']); ?></option>
-            <?php endwhile; ?>
-          </select>
+          <label class="form-label fw-bold required-field">Descripción del Problema</label>
+          <textarea name="descripcion" id="editarDescripcion" class="form-control" rows="4" required></textarea>
         </div>
 
         <div class="mb-3">
           <label class="form-label fw-bold">Comentarios Adicionales</label>
-          <textarea name="comentarios" id="comentariosTicket" class="form-control" rows="3" 
-                    placeholder="Agregue comentarios sobre la resolución..."></textarea>
+          <textarea name="comentarios" id="editarComentarios" class="form-control" rows="3"></textarea>
         </div>
       </div>
 
@@ -676,7 +816,7 @@ document.getElementById("numeroSerie").addEventListener('input', function() {
 });
 
 // Escáner de código de barras
-function iniciarEscaneo() {
+function iniciarEscaneo(targetField = 'numeroSerie') {
   const scannerContainer = document.getElementById("scanner-container");
   const video = document.getElementById("scanner-video");
   
@@ -708,13 +848,13 @@ function iniciarEscaneo() {
   
   Quagga.onDetected(function(result) {
     const code = result.codeResult.code;
-    document.getElementById("numeroSerie").value = code;
+    document.getElementById(targetField).value = code;
     Quagga.stop();
     scannerContainer.style.display = 'none';
     
     // Disparar evento input para validar automáticamente
     const event = new Event('input');
-    document.getElementById("numeroSerie").dispatchEvent(event);
+    document.getElementById(targetField).dispatchEvent(event);
     
     // Mostrar notificación
     mostrarNotificacion('Código escaneado: ' + code, 'success');
@@ -776,19 +916,101 @@ if (modalVer) {
 
 // Configurar modal de edición para SuperAdmin
 <?php if ($rol == 'SuperAdmin'): ?>
+// Funciones para el formulario de edición
+function toggleCamposEquipoEdit() {
+  const tipo = document.getElementById("editarTipoEquipo").value;
+  const camposMaquina = document.getElementById("editarCamposMaquina");
+  
+  if (tipo === 'maquina_juego') {
+    camposMaquina.style.display = 'block';
+    document.getElementById("editarNumeroSerie").required = true;
+  } else {
+    camposMaquina.style.display = 'none';
+    document.getElementById("editarNumeroSerie").required = false;
+    document.getElementById("editarSerieValida").style.display = 'none';
+    document.getElementById("editarSerieInvalida").style.display = 'none';
+  }
+}
+
+function actualizarDatosEmpleadoEdit() {
+  const select = document.getElementById("editarEmpleadoSelect");
+  const selected = select.options[select.selectedIndex];
+  const datosDiv = document.getElementById("editarDatosEmpleado");
+
+  if (selected.value !== "") {
+    document.getElementById("editarNombreEmp").textContent = selected.dataset.nombre || 'No disponible';
+    document.getElementById("editarCargoEmp").textContent = selected.dataset.cargo || 'No disponible';
+    document.getElementById("editarAreaEmp").textContent = selected.dataset.area || 'No disponible';
+    datosDiv.style.display = 'block';
+  } else {
+    datosDiv.style.display = 'none';
+  }
+}
+
+function validarSerieEdit(serie) {
+  const valido = document.getElementById("editarSerieValida");
+  const invalido = document.getElementById("editarSerieInvalida");
+  
+  const seriesValidas = <?php echo json_encode($series_validas); ?>;
+  const infoMaquinas = <?php echo json_encode($info_maquinas); ?>;
+  
+  if (seriesValidas.includes(serie)) {
+    const maquina = infoMaquinas[serie];
+    let infoAdicional = `<strong>Número de serie válido</strong>`;
+    
+    if (maquina) {
+      infoAdicional += `<br><strong>Máquina:</strong> ${maquina.nombre_maquina || 'No disponible'}`;
+      infoAdicional += `<br><strong>Modelo:</strong> ${maquina.modelo || 'No disponible'}`;
+      infoAdicional += `<br><strong>Marca:</strong> ${maquina.marca || 'No disponible'}`;
+      infoAdicional += `<br><strong>Estado:</strong> ${maquina.estado || 'No disponible'}`;
+    }
+    
+    document.getElementById("editarValidoText").innerHTML = infoAdicional;
+    valido.style.display = 'block';
+    invalido.style.display = 'none';
+  } else {
+    valido.style.display = 'none';
+    invalido.style.display = 'block';
+  }
+}
+
 const modalEditar = document.getElementById('modalEditarTicket');
 if (modalEditar) {
   modalEditar.addEventListener('show.bs.modal', function(event) {
     const button = event.relatedTarget;
+    
+    // Obtener todos los datos del atributo data-*
     const ticketId = button.getAttribute('data-ticket-id');
     const estadoActual = button.getAttribute('data-estado-actual');
     const asignadoActual = button.getAttribute('data-asignado-actual');
     const comentariosActual = button.getAttribute('data-comentarios-actual');
+    const asuntoActual = button.getAttribute('data-asunto-actual');
+    const descripcionActual = button.getAttribute('data-descripcion-actual');
+    const tipoEquipoActual = button.getAttribute('data-tipo-equipo-actual');
+    const numeroSerieActual = button.getAttribute('data-numero-serie-actual');
+    const departamentoActual = button.getAttribute('data-departamento-actual');
+    const empleadoActual = button.getAttribute('data-empleado-actual');
     
+    // Llenar el formulario
     document.getElementById('editarTicketId').value = ticketId;
-    document.getElementById('nuevoEstado').value = estadoActual;
-    document.getElementById('asignadoA').value = asignadoActual || 0;
-    document.getElementById('comentariosTicket').value = comentariosActual || '';
+    document.getElementById('editarEstado').value = estadoActual;
+    document.getElementById('editarAsignadoA').value = asignadoActual || 0;
+    document.getElementById('editarComentarios').value = comentariosActual || '';
+    document.getElementById('editarAsunto').value = asuntoActual;
+    document.getElementById('editarDescripcion').value = descripcionActual;
+    document.getElementById('editarTipoEquipo').value = tipoEquipoActual;
+    document.getElementById('editarNumeroSerie').value = numeroSerieActual;
+    document.getElementById('editarDepartamento').value = departamentoActual;
+    document.getElementById('editarEmpleadoSelect').value = empleadoActual;
+    
+    // Actualizar campos dependientes
+    toggleCamposEquipoEdit();
+    actualizarDatosEmpleadoEdit();
+    
+    // Validar número de serie si es máquina de juego
+    if (tipoEquipoActual === 'maquina_juego' && numeroSerieActual) {
+      validarSerieEdit(numeroSerieActual);
+    }
   });
 }
 <?php endif; ?>
@@ -803,4 +1025,3 @@ document.addEventListener('DOMContentLoaded', function() {
 </script>
 </body>
 </html>
-
