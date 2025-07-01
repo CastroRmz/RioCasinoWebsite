@@ -1,103 +1,141 @@
 <?php
-// Mostrar errores para desarrollo
+// Configuración de errores para desarrollo
 error_reporting(E_ALL);
 ini_set('display_errors', 1);
 
 include("../../../conexion.php");
 
+// Función para sanitizar entradas
+function sanitizarInput($input) {
+    return htmlspecialchars(trim($input ?? ''), ENT_QUOTES, 'UTF-8');
+}
+
+// Función para ejecutar consultas preparadas
+function ejecutarConsulta($conn, $sql, $params = [], $types = '') {
+    $stmt = $conn->prepare($sql);
+    if ($stmt === false) {
+        throw new Exception("Error al preparar la consulta: " . $conn->error);
+    }
+    
+    if (!empty($params)) {
+        $stmt->bind_param($types, ...$params);
+    }
+    
+    if (!$stmt->execute()) {
+        throw new Exception("Error al ejecutar la consulta: " . $stmt->error);
+    }
+    
+    return $stmt;
+}
+
 $msg = "";
+$usuario = $_SESSION['usuario'] ?? 'SuperAdmin'; // Usar sesión real en producción
 
-// Procesar formulario POST
-if ($_SERVER["REQUEST_METHOD"] === "POST" && isset($_POST['accion'])) {
-    $usuario = "SuperAdmin"; // Usuario fijo para demo
+try {
+    // Procesar formulario POST
+    if ($_SERVER["REQUEST_METHOD"] === "POST" && isset($_POST['accion'])) {
+        // Agregar máquina
+        if ($_POST['accion'] === "agregar") {
+            $nombre = sanitizarInput($_POST["nombre"]);
+            $modelo = sanitizarInput($_POST["modelo"]);
+            $marca = sanitizarInput($_POST["marca"]);
+            $numero_serie = sanitizarInput($_POST["numero_serie"]);
+            $ebox_mac = sanitizarInput($_POST["ebox_mac"]);
+            $estado = sanitizarInput($_POST["estado"]);
+            $fecha_mtto = !empty($_POST["fecha_mtto"]) ? date('Y-m-d', strtotime($_POST["fecha_mtto"])) : null;
+            $proximo_mtto = !empty($_POST["proximo_mtto"]) ? date('Y-m-d', strtotime($_POST["proximo_mtto"])) : null;
+            $garantia_vigente = isset($_POST["garantia_vigente"]) ? 1 : 0;
 
-    // Agregar
-    if ($_POST['accion'] === "agregar") {
-        $nombre = trim($_POST["nombre"] ?? '');
-        $modelo = trim($_POST["modelo"] ?? '');
-        $marca = trim($_POST["marca"] ?? '');
-        $numero_serie = trim($_POST["numero_serie"] ?? '');
-        $ebox_mac = trim($_POST["ebox_mac"] ?? '');
-        $estado = $_POST["estado"] ?? '';
-
-        if ($nombre && $modelo && $marca && $numero_serie) {
-            $stmt = $conn->prepare("INSERT INTO maquinas (nombre, modelo, marca, numero_serie, ebox_mac, estado, usuario) VALUES (?, ?, ?, ?, ?, ?, ?)");
-            $stmt->bind_param("sssssss", $nombre, $modelo, $marca, $numero_serie, $ebox_mac, $estado, $usuario);
-            
-            if ($stmt->execute()) {
+            if ($nombre && $modelo && $marca && $numero_serie) {
+                $sql = "INSERT INTO maquinas (nombre, modelo, marca, numero_serie, ebox_mac, estado, fecha_ultimo_mtto, proximo_mtto, garantia_vigente, usuario) 
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+                
+                $stmt = ejecutarConsulta($conn, $sql, [
+                    $nombre, $modelo, $marca, $numero_serie, $ebox_mac, $estado, 
+                    $fecha_mtto, $proximo_mtto, $garantia_vigente, $usuario
+                ], "ssssssssis");
+                
                 $idmac = $stmt->insert_id;
+                
+                // Registrar en historial
                 $desc = "Máquina creada";
-                $historial = $conn->prepare("INSERT INTO historial_maquinas (idmac, descripcion, usuario) VALUES (?, ?, ?)");
-                $historial->bind_param("iss", $idmac, $desc, $usuario);
-                $historial->execute();
-                $historial->close();
+                ejecutarConsulta($conn, 
+                    "INSERT INTO historial_maquinas (idmac, descripcion, usuario, motivo_cambio) VALUES (?, ?, ?, ?)",
+                    [$idmac, $desc, $usuario, "Creación inicial"], "isss");
+                
                 $msg = "Máquina agregada correctamente.";
+                $stmt->close();
             } else {
-                $msg = "Error al agregar máquina: " . $stmt->error;
+                $msg = "Todos los campos obligatorios deben estar completos.";
             }
-            $stmt->close();
-        } else {
-            $msg = "Todos los campos obligatorios deben estar completos.";
         }
-    }
 
-    // Editar
-    if ($_POST['accion'] === "editar") {
-        $idmac = intval($_POST["idmac"] ?? 0);
-        $nombre = trim($_POST["nombre"] ?? '');
-        $modelo = trim($_POST["modelo"] ?? '');
-        $marca = trim($_POST["marca"] ?? '');
-        $numero_serie = trim($_POST["numero_serie"] ?? '');
-        $ebox_mac = trim($_POST["ebox_mac"] ?? '');
-        $estado = $_POST["estado"] ?? '';
+        // Editar máquina
+        if ($_POST['accion'] === "editar") {
+            $idmac = intval($_POST["idmac"] ?? 0);
+            $nombre = sanitizarInput($_POST["nombre"]);
+            $modelo = sanitizarInput($_POST["modelo"]);
+            $marca = sanitizarInput($_POST["marca"]);
+            $numero_serie = sanitizarInput($_POST["numero_serie"]);
+            $ebox_mac = sanitizarInput($_POST["ebox_mac"]);
+            $estado = sanitizarInput($_POST["estado"]);
+            $fecha_mtto = !empty($_POST["fecha_mtto"]) ? date('Y-m-d', strtotime($_POST["fecha_mtto"])) : null;
+            $proximo_mtto = !empty($_POST["proximo_mtto"]) ? date('Y-m-d', strtotime($_POST["proximo_mtto"])) : null;
+            $garantia_vigente = isset($_POST["garantia_vigente"]) ? 1 : 0;
+            $motivo = sanitizarInput($_POST["motivo"] ?? "Actualización de datos");
 
-        if ($idmac > 0 && $nombre && $modelo && $marca && $numero_serie) {
-            $stmt = $conn->prepare("UPDATE maquinas SET nombre=?, modelo=?, marca=?, numero_serie=?, ebox_mac=?, estado=? WHERE idmac=?");
-            $stmt->bind_param("ssssssi", $nombre, $modelo, $marca, $numero_serie, $ebox_mac, $estado, $idmac);
-
-            if ($stmt->execute()) {
+            if ($idmac > 0 && $nombre && $modelo && $marca && $numero_serie) {
+                $sql = "UPDATE maquinas SET nombre=?, modelo=?, marca=?, numero_serie=?, ebox_mac=?, estado=?, 
+                        fecha_ultimo_mtto=?, proximo_mtto=?, garantia_vigente=? 
+                        WHERE idmac=?";
+                
+                $stmt = ejecutarConsulta($conn, $sql, [
+                    $nombre, $modelo, $marca, $numero_serie, $ebox_mac, $estado, 
+                    $fecha_mtto, $proximo_mtto, $garantia_vigente, $idmac
+                ], "ssssssssii");
+                
+                // Registrar en historial
                 $desc = "Máquina editada";
-                $historial = $conn->prepare("INSERT INTO historial_maquinas (idmac, descripcion, usuario) VALUES (?, ?, ?)");
-                $historial->bind_param("iss", $idmac, $desc, $usuario);
-                $historial->execute();
-                $historial->close();
+                ejecutarConsulta($conn, 
+                    "INSERT INTO historial_maquinas (idmac, descripcion, usuario, motivo_cambio) VALUES (?, ?, ?, ?)",
+                    [$idmac, $desc, $usuario, $motivo], "isss");
+                
                 $msg = "Máquina actualizada correctamente.";
+                $stmt->close();
             } else {
-                $msg = "Error al actualizar máquina: " . $stmt->error;
+                $msg = "Faltan campos obligatorios o ID inválido.";
             }
-            $stmt->close();
-        } else {
-            $msg = "Faltan campos obligatorios o id inválido.";
         }
     }
-}
 
-// Eliminar máquina
-if (isset($_GET["accion"]) && $_GET["accion"] === "eliminar" && isset($_GET["idmac"])) {
-    $idmac = intval($_GET["idmac"]);
-    $usuario = "SuperAdmin";
-    $desc = "Máquina eliminada";
+    // Eliminar máquina
+    if (isset($_GET["accion"]) && $_GET["accion"] === "eliminar" && isset($_GET["idmac"])) {
+        $idmac = intval($_GET["idmac"]);
+        $motivo = sanitizarInput($_GET["motivo"] ?? "Eliminación solicitada");
 
-    $historial = $conn->prepare("INSERT INTO historial_maquinas (idmac, descripcion, usuario) VALUES (?, ?, ?)");
-    $historial->bind_param("iss", $idmac, $desc, $usuario);
-    $historial->execute();
-    $historial->close();
+        // Registrar en historial primero
+        ejecutarConsulta($conn, 
+            "INSERT INTO historial_maquinas (idmac, descripcion, usuario, motivo_cambio) VALUES (?, ?, ?, ?)",
+            [$idmac, "Máquina eliminada", $usuario, $motivo], "isss");
 
-    $stmt = $conn->prepare("DELETE FROM maquinas WHERE idmac = ?");
-    $stmt->bind_param("i", $idmac);
-    if ($stmt->execute()) {
+        // Eliminar máquina
+        $stmt = ejecutarConsulta($conn, "DELETE FROM maquinas WHERE idmac = ?", [$idmac], "i");
+        
         $msg = "Máquina eliminada correctamente.";
-    } else {
-        $msg = "Error al eliminar máquina: " . $stmt->error;
+        $stmt->close();
     }
-    $stmt->close();
+
+} catch (Exception $e) {
+    error_log("Error en gestión de máquinas: " . $e->getMessage());
+    $msg = "Ocurrió un error al procesar la solicitud: " . $e->getMessage();
 }
 
-// Obtener parámetros de búsqueda y filtros
-$busqueda = $_GET['busqueda'] ?? '';
-$filtro_estado = $_GET['filtro_estado'] ?? '';
-$filtro_marca = $_GET['filtro_marca'] ?? '';
-$filtro_modelo = $_GET['filtro_modelo'] ?? '';
+// Obtener y sanitizar parámetros de búsqueda
+$busqueda = sanitizarInput($_GET['busqueda'] ?? '');
+$filtro_estado = sanitizarInput($_GET['filtro_estado'] ?? '');
+$filtro_marca = sanitizarInput($_GET['filtro_marca'] ?? '');
+$filtro_modelo = sanitizarInput($_GET['filtro_modelo'] ?? '');
+$filtro_mtto = sanitizarInput($_GET['filtro_mtto'] ?? '');
 
 // Configuración de paginación
 $por_pagina = 10;
@@ -108,7 +146,7 @@ $orden = isset($_GET['orden']) ? $_GET['orden'] : 'idmac';
 $direccion = isset($_GET['dir']) ? $_GET['dir'] : 'DESC';
 
 // Validar campos de ordenación permitidos
-$campos_orden = ['idmac', 'nombre', 'modelo', 'marca', 'numero_serie', 'estado', 'fecha_creacion'];
+$campos_orden = ['idmac', 'nombre', 'modelo', 'marca', 'numero_serie', 'estado', 'fecha_creacion', 'fecha_ultimo_mtto', 'proximo_mtto'];
 if (!in_array($orden, $campos_orden)) {
     $orden = 'idmac';
 }
@@ -144,6 +182,32 @@ if (!empty($filtro_modelo)) {
     $types .= 's';
 }
 
+if (!empty($filtro_mtto)) {
+    $now = date('Y-m-d');
+    switch ($filtro_mtto) {
+        case 'vencido':
+            $sql .= " AND (fecha_ultimo_mtto IS NULL OR fecha_ultimo_mtto < ?)";
+            $params[] = $now;
+            $types .= 's';
+            break;
+        case 'proximo':
+            $nextMonth = date('Y-m-d', strtotime('+1 month'));
+            $sql .= " AND (proximo_mtto BETWEEN ? AND ?)";
+            $params[] = $now;
+            $params[] = $nextMonth;
+            $types .= 'ss';
+            break;
+        case 'al_dia':
+            $sql .= " AND (fecha_ultimo_mtto >= ?)";
+            $params[] = $now;
+            $types .= 's';
+            break;
+        case 'sin_garantia':
+            $sql .= " AND (garantia_vigente = 0)";
+            break;
+    }
+}
+
 // Contar total de registros para paginación
 $sql_count = "SELECT COUNT(*) AS total FROM maquinas WHERE 1=1";
 if (!empty($busqueda)) {
@@ -157,6 +221,22 @@ if (!empty($filtro_marca)) {
 }
 if (!empty($filtro_modelo)) {
     $sql_count .= " AND modelo = ?";
+}
+if (!empty($filtro_mtto)) {
+    switch ($filtro_mtto) {
+        case 'vencido':
+            $sql_count .= " AND (fecha_ultimo_mtto IS NULL OR fecha_ultimo_mtto < ?)";
+            break;
+        case 'proximo':
+            $sql_count .= " AND (proximo_mtto BETWEEN ? AND ?)";
+            break;
+        case 'al_dia':
+            $sql_count .= " AND (fecha_ultimo_mtto >= ?)";
+            break;
+        case 'sin_garantia':
+            $sql_count .= " AND (garantia_vigente = 0)";
+            break;
+    }
 }
 
 $stmt_count = $conn->prepare($sql_count);
