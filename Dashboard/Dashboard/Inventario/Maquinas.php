@@ -1,103 +1,141 @@
 <?php
-// Mostrar errores para desarrollo
+// Configuración de errores para desarrollo
 error_reporting(E_ALL);
 ini_set('display_errors', 1);
 
 include("../../../conexion.php");
 
+// Función para sanitizar entradas
+function sanitizarInput($input) {
+    return htmlspecialchars(trim($input ?? ''), ENT_QUOTES, 'UTF-8');
+}
+
+// Función para ejecutar consultas preparadas
+function ejecutarConsulta($conn, $sql, $params = [], $types = '') {
+    $stmt = $conn->prepare($sql);
+    if ($stmt === false) {
+        throw new Exception("Error al preparar la consulta: " . $conn->error);
+    }
+    
+    if (!empty($params)) {
+        $stmt->bind_param($types, ...$params);
+    }
+    
+    if (!$stmt->execute()) {
+        throw new Exception("Error al ejecutar la consulta: " . $stmt->error);
+    }
+    
+    return $stmt;
+}
+
 $msg = "";
+$usuario = $_SESSION['usuario'] ?? 'SuperAdmin'; // Usar sesión real en producción
 
-// Procesar formulario POST
-if ($_SERVER["REQUEST_METHOD"] === "POST" && isset($_POST['accion'])) {
-    $usuario = "SuperAdmin"; // Usuario fijo para demo
+try {
+    // Procesar formulario POST
+    if ($_SERVER["REQUEST_METHOD"] === "POST" && isset($_POST['accion'])) {
+        // Agregar máquina
+        if ($_POST['accion'] === "agregar") {
+            $nombre = sanitizarInput($_POST["nombre"]);
+            $modelo = sanitizarInput($_POST["modelo"]);
+            $marca = sanitizarInput($_POST["marca"]);
+            $numero_serie = sanitizarInput($_POST["numero_serie"]);
+            $ebox_mac = sanitizarInput($_POST["ebox_mac"]);
+            $estado = sanitizarInput($_POST["estado"]);
+            $fecha_mtto = !empty($_POST["fecha_mtto"]) ? date('Y-m-d', strtotime($_POST["fecha_mtto"])) : null;
+            $proximo_mtto = !empty($_POST["proximo_mtto"]) ? date('Y-m-d', strtotime($_POST["proximo_mtto"])) : null;
+            $garantia_vigente = isset($_POST["garantia_vigente"]) ? 1 : 0;
 
-    // Agregar
-    if ($_POST['accion'] === "agregar") {
-        $nombre = trim($_POST["nombre"] ?? '');
-        $modelo = trim($_POST["modelo"] ?? '');
-        $marca = trim($_POST["marca"] ?? '');
-        $numero_serie = trim($_POST["numero_serie"] ?? '');
-        $ebox_mac = trim($_POST["ebox_mac"] ?? '');
-        $estado = $_POST["estado"] ?? '';
-
-        if ($nombre && $modelo && $marca && $numero_serie) {
-            $stmt = $conn->prepare("INSERT INTO maquinas (nombre, modelo, marca, numero_serie, ebox_mac, estado, usuario) VALUES (?, ?, ?, ?, ?, ?, ?)");
-            $stmt->bind_param("sssssss", $nombre, $modelo, $marca, $numero_serie, $ebox_mac, $estado, $usuario);
-            
-            if ($stmt->execute()) {
+            if ($nombre && $modelo && $marca && $numero_serie) {
+                $sql = "INSERT INTO maquinas (nombre, modelo, marca, numero_serie, ebox_mac, estado, fecha_ultimo_mtto, proximo_mtto, garantia_vigente, usuario) 
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+                
+                $stmt = ejecutarConsulta($conn, $sql, [
+                    $nombre, $modelo, $marca, $numero_serie, $ebox_mac, $estado, 
+                    $fecha_mtto, $proximo_mtto, $garantia_vigente, $usuario
+                ], "ssssssssis");
+                
                 $idmac = $stmt->insert_id;
+                
+                // Registrar en historial
                 $desc = "Máquina creada";
-                $historial = $conn->prepare("INSERT INTO historial_maquinas (idmac, descripcion, usuario) VALUES (?, ?, ?)");
-                $historial->bind_param("iss", $idmac, $desc, $usuario);
-                $historial->execute();
-                $historial->close();
+                ejecutarConsulta($conn, 
+                    "INSERT INTO historial_maquinas (idmac, descripcion, usuario, motivo_cambio) VALUES (?, ?, ?, ?)",
+                    [$idmac, $desc, $usuario, "Creación inicial"], "isss");
+                
                 $msg = "Máquina agregada correctamente.";
+                $stmt->close();
             } else {
-                $msg = "Error al agregar máquina: " . $stmt->error;
+                $msg = "Todos los campos obligatorios deben estar completos.";
             }
-            $stmt->close();
-        } else {
-            $msg = "Todos los campos obligatorios deben estar completos.";
         }
-    }
 
-    // Editar
-    if ($_POST['accion'] === "editar") {
-        $idmac = intval($_POST["idmac"] ?? 0);
-        $nombre = trim($_POST["nombre"] ?? '');
-        $modelo = trim($_POST["modelo"] ?? '');
-        $marca = trim($_POST["marca"] ?? '');
-        $numero_serie = trim($_POST["numero_serie"] ?? '');
-        $ebox_mac = trim($_POST["ebox_mac"] ?? '');
-        $estado = $_POST["estado"] ?? '';
+        // Editar máquina
+        if ($_POST['accion'] === "editar") {
+            $idmac = intval($_POST["idmac"] ?? 0);
+            $nombre = sanitizarInput($_POST["nombre"]);
+            $modelo = sanitizarInput($_POST["modelo"]);
+            $marca = sanitizarInput($_POST["marca"]);
+            $numero_serie = sanitizarInput($_POST["numero_serie"]);
+            $ebox_mac = sanitizarInput($_POST["ebox_mac"]);
+            $estado = sanitizarInput($_POST["estado"]);
+            $fecha_mtto = !empty($_POST["fecha_mtto"]) ? date('Y-m-d', strtotime($_POST["fecha_mtto"])) : null;
+            $proximo_mtto = !empty($_POST["proximo_mtto"]) ? date('Y-m-d', strtotime($_POST["proximo_mtto"])) : null;
+            $garantia_vigente = isset($_POST["garantia_vigente"]) ? 1 : 0;
+            $motivo = sanitizarInput($_POST["motivo"] ?? "Actualización de datos");
 
-        if ($idmac > 0 && $nombre && $modelo && $marca && $numero_serie) {
-            $stmt = $conn->prepare("UPDATE maquinas SET nombre=?, modelo=?, marca=?, numero_serie=?, ebox_mac=?, estado=? WHERE idmac=?");
-            $stmt->bind_param("ssssssi", $nombre, $modelo, $marca, $numero_serie, $ebox_mac, $estado, $idmac);
-
-            if ($stmt->execute()) {
+            if ($idmac > 0 && $nombre && $modelo && $marca && $numero_serie) {
+                $sql = "UPDATE maquinas SET nombre=?, modelo=?, marca=?, numero_serie=?, ebox_mac=?, estado=?, 
+                        fecha_ultimo_mtto=?, proximo_mtto=?, garantia_vigente=? 
+                        WHERE idmac=?";
+                
+                $stmt = ejecutarConsulta($conn, $sql, [
+                    $nombre, $modelo, $marca, $numero_serie, $ebox_mac, $estado, 
+                    $fecha_mtto, $proximo_mtto, $garantia_vigente, $idmac
+                ], "ssssssssii");
+                
+                // Registrar en historial
                 $desc = "Máquina editada";
-                $historial = $conn->prepare("INSERT INTO historial_maquinas (idmac, descripcion, usuario) VALUES (?, ?, ?)");
-                $historial->bind_param("iss", $idmac, $desc, $usuario);
-                $historial->execute();
-                $historial->close();
+                ejecutarConsulta($conn, 
+                    "INSERT INTO historial_maquinas (idmac, descripcion, usuario, motivo_cambio) VALUES (?, ?, ?, ?)",
+                    [$idmac, $desc, $usuario, $motivo], "isss");
+                
                 $msg = "Máquina actualizada correctamente.";
+                $stmt->close();
             } else {
-                $msg = "Error al actualizar máquina: " . $stmt->error;
+                $msg = "Faltan campos obligatorios o ID inválido.";
             }
-            $stmt->close();
-        } else {
-            $msg = "Faltan campos obligatorios o id inválido.";
         }
     }
-}
 
-// Eliminar máquina
-if (isset($_GET["accion"]) && $_GET["accion"] === "eliminar" && isset($_GET["idmac"])) {
-    $idmac = intval($_GET["idmac"]);
-    $usuario = "SuperAdmin";
-    $desc = "Máquina eliminada";
+    // Eliminar máquina
+    if (isset($_GET["accion"]) && $_GET["accion"] === "eliminar" && isset($_GET["idmac"])) {
+        $idmac = intval($_GET["idmac"]);
+        $motivo = sanitizarInput($_GET["motivo"] ?? "Eliminación solicitada");
 
-    $historial = $conn->prepare("INSERT INTO historial_maquinas (idmac, descripcion, usuario) VALUES (?, ?, ?)");
-    $historial->bind_param("iss", $idmac, $desc, $usuario);
-    $historial->execute();
-    $historial->close();
+        // Registrar en historial primero
+        ejecutarConsulta($conn, 
+            "INSERT INTO historial_maquinas (idmac, descripcion, usuario, motivo_cambio) VALUES (?, ?, ?, ?)",
+            [$idmac, "Máquina eliminada", $usuario, $motivo], "isss");
 
-    $stmt = $conn->prepare("DELETE FROM maquinas WHERE idmac = ?");
-    $stmt->bind_param("i", $idmac);
-    if ($stmt->execute()) {
+        // Eliminar máquina
+        $stmt = ejecutarConsulta($conn, "DELETE FROM maquinas WHERE idmac = ?", [$idmac], "i");
+        
         $msg = "Máquina eliminada correctamente.";
-    } else {
-        $msg = "Error al eliminar máquina: " . $stmt->error;
+        $stmt->close();
     }
-    $stmt->close();
+
+} catch (Exception $e) {
+    error_log("Error en gestión de máquinas: " . $e->getMessage());
+    $msg = "Ocurrió un error al procesar la solicitud: " . $e->getMessage();
 }
 
-// Obtener parámetros de búsqueda y filtros
-$busqueda = $_GET['busqueda'] ?? '';
-$filtro_estado = $_GET['filtro_estado'] ?? '';
-$filtro_marca = $_GET['filtro_marca'] ?? '';
-$filtro_modelo = $_GET['filtro_modelo'] ?? '';
+// Obtener y sanitizar parámetros de búsqueda
+$busqueda = sanitizarInput($_GET['busqueda'] ?? '');
+$filtro_estado = sanitizarInput($_GET['filtro_estado'] ?? '');
+$filtro_marca = sanitizarInput($_GET['filtro_marca'] ?? '');
+$filtro_modelo = sanitizarInput($_GET['filtro_modelo'] ?? '');
+$filtro_mtto = sanitizarInput($_GET['filtro_mtto'] ?? '');
 
 // Configuración de paginación
 $por_pagina = 10;
@@ -108,7 +146,7 @@ $orden = isset($_GET['orden']) ? $_GET['orden'] : 'idmac';
 $direccion = isset($_GET['dir']) ? $_GET['dir'] : 'DESC';
 
 // Validar campos de ordenación permitidos
-$campos_orden = ['idmac', 'nombre', 'modelo', 'marca', 'numero_serie', 'estado', 'fecha_creacion'];
+$campos_orden = ['idmac', 'nombre', 'modelo', 'marca', 'numero_serie', 'estado', 'fecha_creacion', 'fecha_ultimo_mtto', 'proximo_mtto'];
 if (!in_array($orden, $campos_orden)) {
     $orden = 'idmac';
 }
@@ -144,6 +182,32 @@ if (!empty($filtro_modelo)) {
     $types .= 's';
 }
 
+if (!empty($filtro_mtto)) {
+    $now = date('Y-m-d');
+    switch ($filtro_mtto) {
+        case 'vencido':
+            $sql .= " AND (fecha_ultimo_mtto IS NULL OR fecha_ultimo_mtto < ?)";
+            $params[] = $now;
+            $types .= 's';
+            break;
+        case 'proximo':
+            $nextMonth = date('Y-m-d', strtotime('+1 month'));
+            $sql .= " AND (proximo_mtto BETWEEN ? AND ?)";
+            $params[] = $now;
+            $params[] = $nextMonth;
+            $types .= 'ss';
+            break;
+        case 'al_dia':
+            $sql .= " AND (fecha_ultimo_mtto >= ?)";
+            $params[] = $now;
+            $types .= 's';
+            break;
+        case 'sin_garantia':
+            $sql .= " AND (garantia_vigente = 0)";
+            break;
+    }
+}
+
 // Contar total de registros para paginación
 $sql_count = "SELECT COUNT(*) AS total FROM maquinas WHERE 1=1";
 if (!empty($busqueda)) {
@@ -157,6 +221,22 @@ if (!empty($filtro_marca)) {
 }
 if (!empty($filtro_modelo)) {
     $sql_count .= " AND modelo = ?";
+}
+if (!empty($filtro_mtto)) {
+    switch ($filtro_mtto) {
+        case 'vencido':
+            $sql_count .= " AND (fecha_ultimo_mtto IS NULL OR fecha_ultimo_mtto < ?)";
+            break;
+        case 'proximo':
+            $sql_count .= " AND (proximo_mtto BETWEEN ? AND ?)";
+            break;
+        case 'al_dia':
+            $sql_count .= " AND (fecha_ultimo_mtto >= ?)";
+            break;
+        case 'sin_garantia':
+            $sql_count .= " AND (garantia_vigente = 0)";
+            break;
+    }
 }
 
 $stmt_count = $conn->prepare($sql_count);
@@ -374,6 +454,17 @@ if ($result->num_rows > 0) {
             </div>
 
             <div class="col-md-2">
+                <label class="filter-label">Mantenimiento</label>
+                <select name="filtro_mtto" class="form-select">
+                    <option value="">Todos</option>
+                    <option value="al_dia" <?= $filtro_mtto === 'al_dia' ? 'selected' : '' ?>>Al día</option>
+                    <option value="proximo" <?= $filtro_mtto === 'proximo' ? 'selected' : '' ?>>Próximo</option>
+                    <option value="vencido" <?= $filtro_mtto === 'vencido' ? 'selected' : '' ?>>Vencido</option>
+                    <option value="sin_garantia" <?= $filtro_mtto === 'sin_garantia' ? 'selected' : '' ?>>Sin garantía</option>
+                </select>
+            </div>
+
+            <div class="col-md-2">
                 <button type="submit" class="btn btn-primary filter-reset">
                     <i class="bi bi-funnel"></i> Filtrar
                 </button>
@@ -396,7 +487,7 @@ if ($result->num_rows > 0) {
     <!-- Tabla de máquinas -->
     <div class="table-responsive">
         <table class="table table-striped table-bordered bg-white">
-            <thead class = "table-dark">
+            <thead class="table-dark">
                 <tr>
                     <th width="50">
                         <a href="?<?= http_build_query(array_merge($_GET, ['orden' => 'idmac', 'dir' => $orden === 'idmac' && $direccion === 'DESC' ? 'ASC' : 'DESC'])) ?>">
@@ -430,12 +521,18 @@ if ($result->num_rows > 0) {
                         </a>
                     </th>
                     <th width="120">
-                        <a href="?<?= http_build_query(array_merge($_GET, ['orden' => 'fecha_creacion', 'dir' => $orden === 'fecha_creacion' && $direccion === 'DESC' ? 'ASC' : 'DESC'])) ?>">
-                            Fecha Creación <?= $orden === 'fecha_creacion' ? ($direccion === 'ASC' ? '↑' : '↓') : '' ?>
+                        <a href="?<?= http_build_query(array_merge($_GET, ['orden' => 'fecha_ultimo_mtto', 'dir' => $orden === 'fecha_ultimo_mtto' && $direccion === 'DESC' ? 'ASC' : 'DESC'])) ?>">
+                            Último Mtto <?= $orden === 'fecha_ultimo_mtto' ? ($direccion === 'ASC' ? '↑' : '↓') : '' ?>
                         </a>
                     </th>
+                    <th width="120">
+                        <a href="?<?= http_build_query(array_merge($_GET, ['orden' => 'proximo_mtto', 'dir' => $orden === 'proximo_mtto' && $direccion === 'DESC' ? 'ASC' : 'DESC'])) ?>">
+                            Próximo Mtto <?= $orden === 'proximo_mtto' ? ($direccion === 'ASC' ? '↑' : '↓') : '' ?>
+                        </a>
+                    </th>
+                    <th width="100">Garantía</th>
                     <th width="100">Usuario</th>
-                    <th width="220">Acciones</th>
+                    <th width="250">Acciones</th>
                 </tr>
             </thead>
             <tbody>
@@ -455,7 +552,13 @@ if ($result->num_rows > 0) {
                             <?= htmlspecialchars($row['estado'] ?? '') ?>
                         </span>
                     </td>
-                    <td><?= date('d/m/Y H:i', strtotime($row['fecha_creacion'])) ?></td>
+                    <td><?= !empty($row['fecha_ultimo_mtto']) ? date('d/m/Y', strtotime($row['fecha_ultimo_mtto'])) : 'Nunca' ?></td>
+                    <td><?= !empty($row['proximo_mtto']) ? date('d/m/Y', strtotime($row['proximo_mtto'])) : 'No programado' ?></td>
+                    <td>
+                        <span class="badge bg-<?= $row['garantia_vigente'] ? 'success' : 'danger' ?>">
+                            <?= $row['garantia_vigente'] ? 'Vigente' : 'Vencida' ?>
+                        </span>
+                    </td>
                     <td><?= htmlspecialchars($row['usuario'] ?? '') ?></td>
                     <td>
                         <div class="action-buttons">
@@ -468,7 +571,9 @@ if ($result->num_rows > 0) {
                             <button class="btn btn-secondary btn-sm" data-bs-toggle="modal" data-bs-target="#modalHistorial<?= $row['idmac'] ?>">
                                 <i class="bi bi-clock-history"></i> Historial
                             </button>
-                            <a href="?<?= http_build_query(array_merge($_GET, ['accion' => 'eliminar', 'idmac' => $row['idmac']])) ?>" class="btn btn-danger btn-sm" onclick="return confirm('¿Estás seguro de eliminar esta máquina?');">
+                            <a href="?<?= http_build_query(array_merge($_GET, ['accion' => 'eliminar', 'idmac' => $row['idmac']])) ?>" 
+                               class="btn btn-danger btn-sm" 
+                               onclick="return confirm('¿Estás seguro de eliminar esta máquina?');">
                                 <i class="bi bi-trash"></i> Eliminar
                             </a>
                         </div>
@@ -477,7 +582,7 @@ if ($result->num_rows > 0) {
                 <?php endwhile; ?>
             <?php else: ?>
                 <tr>
-                    <td colspan="10" class="text-center py-4">No se encontraron máquinas con los filtros aplicados</td>
+                    <td colspan="13" class="text-center py-4">No se encontraron máquinas con los filtros aplicados</td>
                 </tr>
             <?php endif; ?>
             </tbody>
@@ -558,6 +663,21 @@ if ($result->num_rows > 0) {
             <option value="Proceso">Proceso</option>
           </select>
         </div>
+
+        <div class="mb-3">
+          <label for="fechaMttoAgregar" class="form-label">Último Mantenimiento:</label>
+          <input type="date" id="fechaMttoAgregar" name="fecha_mtto" class="form-control">
+        </div>
+
+        <div class="mb-3">
+          <label for="proximoMttoAgregar" class="form-label">Próximo Mantenimiento:</label>
+          <input type="date" id="proximoMttoAgregar" name="proximo_mtto" class="form-control">
+        </div>
+
+        <div class="mb-3 form-check">
+          <input type="checkbox" class="form-check-input" id="garantiaAgregar" name="garantia_vigente" checked>
+          <label class="form-check-label" for="garantiaAgregar">Garantía vigente</label>
+        </div>
       </div>
 
       <div class="modal-footer">
@@ -594,6 +714,7 @@ if ($result->num_rows > 0) {
                   <th width="100">Máquina ID</th>
                   <th>Nombre Máquina</th>
                   <th>Descripción</th>
+                  <th>Motivo</th>
                   <th width="120">Usuario</th>
                   <th width="180">Fecha</th>
                 </tr>
@@ -605,6 +726,7 @@ if ($result->num_rows > 0) {
                     <td><?= htmlspecialchars($hg['idmac'] ?? '') ?></td>
                     <td><?= htmlspecialchars($hg['nombre_maquina'] ?? "Sin máquina") ?></td>
                     <td><?= htmlspecialchars($hg['descripcion'] ?? '') ?></td>
+                    <td><?= htmlspecialchars($hg['motivo_cambio'] ?? '') ?></td>
                     <td><?= htmlspecialchars($hg['usuario'] ?? '') ?></td>
                     <td><?= date('d/m/Y H:i', strtotime($hg['fecha_cambio'])) ?></td>
                   </tr>
@@ -666,6 +788,22 @@ if ($result->num_rows > 0) {
                         ($row['estado'] == 'Alta') ? 'success' : 
                         (($row['estado'] == 'Baja') ? 'danger' : 'warning') ?>">
                         <?= htmlspecialchars($row['estado'] ?? '') ?>
+                    </span>
+                </div>
+            </div>
+            <div class="row mb-3">
+                <div class="col-md-4 fw-bold">Último Mantenimiento:</div>
+                <div class="col-md-8"><?= !empty($row['fecha_ultimo_mtto']) ? date('d/m/Y', strtotime($row['fecha_ultimo_mtto'])) : 'Nunca' ?></div>
+            </div>
+            <div class="row mb-3">
+                <div class="col-md-4 fw-bold">Próximo Mantenimiento:</div>
+                <div class="col-md-8"><?= !empty($row['proximo_mtto']) ? date('d/m/Y', strtotime($row['proximo_mtto'])) : 'No programado' ?></div>
+            </div>
+            <div class="row mb-3">
+                <div class="col-md-4 fw-bold">Garantía:</div>
+                <div class="col-md-8">
+                    <span class="badge bg-<?= $row['garantia_vigente'] ? 'success' : 'danger' ?>">
+                        <?= $row['garantia_vigente'] ? 'Vigente' : 'Vencida' ?>
                     </span>
                 </div>
             </div>
@@ -737,6 +875,30 @@ if ($result->num_rows > 0) {
                   <option value="Proceso" <?= ($row['estado'] ?? '') === 'Proceso' ? 'selected' : '' ?>>Proceso</option>
                 </select>
               </div>
+              
+              <div class="mb-3">
+                <label for="fechaMttoEditar<?= $row['idmac'] ?>" class="form-label">Último Mantenimiento</label>
+                <input type="date" class="form-control" id="fechaMttoEditar<?= $row['idmac'] ?>" 
+                       name="fecha_mtto" value="<?= !empty($row['fecha_ultimo_mtto']) ? date('Y-m-d', strtotime($row['fecha_ultimo_mtto'])) : '' ?>">
+              </div>
+              
+              <div class="mb-3">
+                <label for="proximoMttoEditar<?= $row['idmac'] ?>" class="form-label">Próximo Mantenimiento</label>
+                <input type="date" class="form-control" id="proximoMttoEditar<?= $row['idmac'] ?>" 
+                       name="proximo_mtto" value="<?= !empty($row['proximo_mtto']) ? date('Y-m-d', strtotime($row['proximo_mtto'])) : '' ?>">
+              </div>
+              
+              <div class="mb-3 form-check">
+                <input type="checkbox" class="form-check-input" id="garantiaEditar<?= $row['idmac'] ?>" 
+                       name="garantia_vigente" <?= $row['garantia_vigente'] ? 'checked' : '' ?>>
+                <label class="form-check-label" for="garantiaEditar<?= $row['idmac'] ?>">Garantía vigente</label>
+              </div>
+              
+              <div class="mb-3">
+                <label for="motivoEditar<?= $row['idmac'] ?>" class="form-label">Motivo del Cambio</label>
+                <textarea class="form-control" id="motivoEditar<?= $row['idmac'] ?>" 
+                          name="motivo" rows="2"></textarea>
+              </div>
             </div>
             
             <div class="modal-footer">
@@ -764,6 +926,7 @@ if ($result->num_rows > 0) {
                                     <tr>
                                         <th width="80">ID</th>
                                         <th>Descripción</th>
+                                        <th>Motivo</th>
                                         <th width="120">Usuario</th>
                                         <th width="180">Fecha</th>
                                     </tr>
@@ -773,6 +936,7 @@ if ($result->num_rows > 0) {
                                         <tr>
                                             <td><?= $hist['id'] ?></td>
                                             <td><?= htmlspecialchars($hist['descripcion'] ?? '') ?></td>
+                                            <td><?= htmlspecialchars($hist['motivo_cambio'] ?? '') ?></td>
                                             <td><?= htmlspecialchars($hist['usuario'] ?? '') ?></td>
                                             <td><?= date('d/m/Y H:i', strtotime($hist['fecha_cambio'])) ?></td>
                                         </tr>
