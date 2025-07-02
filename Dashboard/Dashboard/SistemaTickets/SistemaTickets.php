@@ -15,19 +15,28 @@ $mensaje = "";
 
 // Procesar eliminación de ticket
 if (isset($_GET['eliminar'])) {
-    if ($rol == 'SuperAdmin') {
+    if ($rol == 'SuperAdmin' || $rol == 'Admin') {
         $ticket_id = intval($_GET['eliminar']);
         $stmt = $conn->prepare("DELETE FROM tickets WHERE id = ?");
         $stmt->bind_param("i", $ticket_id);
         if ($stmt->execute()) {
-            $mensaje = "Ticket eliminado correctamente.";
-            header("Location: ".str_replace('&eliminar='.$ticket_id, '', $_SERVER['REQUEST_URI']));
+            $_SESSION['notificacion'] = [
+                'mensaje' => "Ticket eliminado correctamente.",
+                'tipo' => 'success'
+            ];
+            header("Location: ".strtok($_SERVER['REQUEST_URI'], '?'));
             exit();
         } else {
-            $mensaje = "Error al eliminar ticket: " . $stmt->error;
+            $_SESSION['notificacion'] = [
+                'mensaje' => "Error al eliminar ticket: " . $stmt->error,
+                'tipo' => 'danger'
+            ];
         }
     } else {
-        $mensaje = "No tienes permisos para eliminar tickets.";
+        $_SESSION['notificacion'] = [
+            'mensaje' => "No tienes permisos para eliminar tickets.",
+            'tipo' => 'warning'
+        ];
     }
 }
 
@@ -59,8 +68,12 @@ $departamentos = $conn->query("SELECT departamento_id, nombre FROM departamentos
                 or die("Error al obtener departamentos: " . $conn->error);
 
 // Obtener usuarios administradores
-$administradores = $conn->query("SELECT Usuario_id, usuario FROM usuarios WHERE Rol = 'Admin'") 
+$administradores = $conn->query("SELECT Usuario_id, usuario FROM usuarios WHERE Rol IN ('Admin', 'SuperAdmin')") 
                  or die("Error al obtener administradores: " . $conn->error);
+
+// Obtener prioridades y categorías
+$prioridades = $conn->query("SELECT prioridad_id, nombre FROM prioridades_ticket ORDER BY nivel_urgencia DESC");
+$categorias = $conn->query("SELECT categoria_id, nombre FROM categorias_problema");
 
 // Procesar formulario de tickets
 if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST["accion"])) {
@@ -71,6 +84,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST["accion"])) {
         $descripcion = isset($_POST["descripcion"]) ? trim($_POST["descripcion"]) : '';
         $asunto = isset($_POST["asunto"]) ? trim($_POST["asunto"]) : '';
         $departamento_id = isset($_POST["departamento_id"]) ? intval($_POST["departamento_id"]) : null;
+        $prioridad_id = isset($_POST["prioridad_id"]) ? intval($_POST["prioridad_id"]) : null;
+        $categoria_id = isset($_POST["categoria_id"]) ? intval($_POST["categoria_id"]) : null;
         $estado = "Abierto";
         
         // Obtener nombre del departamento
@@ -88,26 +103,35 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST["accion"])) {
         
         // Validar número de serie para máquinas de juego
         if ($tipo_equipo == 'maquina_juego' && !in_array($numero_serie, $series_validas)) {
-            $mensaje = "Error: El número de serie no está registrado en el sistema";
-        }
-        
-        if ($mensaje == "") {
+            $_SESSION['notificacion'] = [
+                'mensaje' => "Error: El número de serie no está registrado en el sistema",
+                'tipo' => 'danger'
+            ];
+        } else {
             $stmt = $conn->prepare("INSERT INTO tickets (empleado_id, numero_serie, descripcion, estado, 
-                                  creado_por, asunto, tipo_equipo, ubicacion, departamento_id) 
-                                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
-            $stmt->bind_param("isssisssi", $empleado_id, $numero_serie, $descripcion, $estado, 
-                            $usuario_id, $asunto, $tipo_equipo, $ubicacion, $departamento_id);
+                                  creado_por, asunto, tipo_equipo, ubicacion, departamento_id,
+                                  prioridad_id, categoria_id) 
+                                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+            $stmt->bind_param("isssisssiii", $empleado_id, $numero_serie, $descripcion, $estado, 
+                            $usuario_id, $asunto, $tipo_equipo, $ubicacion, $departamento_id,
+                            $prioridad_id, $categoria_id);
 
             if ($stmt->execute()) {
-                $mensaje = "Ticket creado correctamente.";
+                $_SESSION['notificacion'] = [
+                    'mensaje' => "Ticket creado correctamente.",
+                    'tipo' => 'success'
+                ];
                 header("Location: ".$_SERVER['PHP_SELF']);
                 exit();
             } else {
-                $mensaje = "Error al crear ticket: " . $stmt->error;
+                $_SESSION['notificacion'] = [
+                    'mensaje' => "Error al crear ticket: " . $stmt->error,
+                    'tipo' => 'danger'
+                ];
             }
             $stmt->close();
         }
-    } elseif ($_POST["accion"] == "actualizar_ticket" && $rol == 'SuperAdmin') {
+    } elseif ($_POST["accion"] == "actualizar_ticket" && ($rol == 'SuperAdmin' || $rol == 'Admin')) {
         // Actualizar ticket completo
         $ticket_id = intval($_POST["ticket_id"]);
         $nuevo_estado = $_POST["nuevo_estado"];
@@ -119,6 +143,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST["accion"])) {
         $empleado_id = intval($_POST["empleado_id"]);
         $numero_serie = trim($_POST["numero_serie"]);
         $departamento_id = intval($_POST["departamento_id"]);
+        $prioridad_id = intval($_POST["prioridad_id"]);
+        $categoria_id = intval($_POST["categoria_id"]);
         
         // Obtener nombre del departamento para actualizar ubicación
         $ubicacion = '';
@@ -144,11 +170,13 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST["accion"])) {
             numero_serie = ?,
             departamento_id = ?,
             ubicacion = ?,
+            prioridad_id = ?,
+            categoria_id = ?,
             fecha_proceso = IF(? = 'En proceso', IF(fecha_proceso IS NULL, NOW(), fecha_proceso), fecha_proceso),
             fecha_cierre = IF(? = 'Cerrado', IF(fecha_cierre IS NULL, NOW(), fecha_cierre), fecha_cierre)
             WHERE id = ?");
         
-        $stmt->bind_param("ssissssissii", 
+        $stmt->bind_param("ssissssissiisii", 
             $nuevo_estado, 
             $comentarios, 
             $asignado_a,
@@ -159,34 +187,93 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST["accion"])) {
             $numero_serie,
             $departamento_id,
             $ubicacion,
+            $prioridad_id,
+            $categoria_id,
             $nuevo_estado,
             $nuevo_estado,
             $ticket_id);
         
         if ($stmt->execute()) {
-            $mensaje = "Ticket actualizado correctamente.";
-            header("Location: ".$_SERVER['PHP_SELF']);
+            $_SESSION['notificacion'] = [
+                'mensaje' => "Ticket actualizado correctamente.",
+                'tipo' => 'success'
+            ];
+            header("Location: ".strtok($_SERVER['REQUEST_URI'], '?'));
             exit();
         } else {
-            $mensaje = "Error al actualizar ticket: " . $stmt->error;
+            $_SESSION['notificacion'] = [
+                'mensaje' => "Error al actualizar ticket: " . $stmt->error,
+                'tipo' => 'danger'
+            ];
         }
         $stmt->close();
     }
 }
 
-// Obtener tickets con información completa
-$tickets = $conn->query("
+// Obtener parámetros de filtrado
+$filtro_estado = isset($_GET['estado']) ? $_GET['estado'] : '';
+$filtro_prioridad = isset($_GET['prioridad']) ? intval($_GET['prioridad']) : 0;
+$filtro_categoria = isset($_GET['categoria']) ? intval($_GET['categoria']) : 0;
+$busqueda = isset($_GET['busqueda']) ? trim($_GET['busqueda']) : '';
+
+// Construir consulta con filtros
+$query_tickets = "
     SELECT t.*, e.nombre AS empleado_nombre, u.usuario AS creador, 
            a.usuario AS asignado, d.nombre AS nombre_departamento,
-           m.nombre AS nombre_maquina, m.modelo, m.marca, m.ebox_mac, m.estado AS estado_maquina
+           m.nombre AS nombre_maquina, m.modelo, m.marca, m.ebox_mac, m.estado AS estado_maquina,
+           p.nombre AS prioridad, c.nombre AS categoria
     FROM tickets t
     LEFT JOIN empleados e ON t.empleado_id = e.empleado_id
     LEFT JOIN usuarios u ON t.creado_por = u.Usuario_id
     LEFT JOIN usuarios a ON t.asignado_a = a.Usuario_id
     LEFT JOIN departamentos d ON t.departamento_id = d.departamento_id
     LEFT JOIN maquinas m ON t.numero_serie = m.numero_serie OR t.numero_serie = m.ebox_mac
-    ORDER BY t.fecha_creacion DESC
-") or die("Error al obtener tickets: " . $conn->error);
+    LEFT JOIN prioridades_ticket p ON t.prioridad_id = p.prioridad_id
+    LEFT JOIN categorias_problema c ON t.categoria_id = c.categoria_id
+    WHERE 1=1
+";
+
+$params = array();
+$types = '';
+
+// Aplicar filtros
+if ($filtro_estado != '') {
+    $query_tickets .= " AND t.estado = ?";
+    $params[] = $filtro_estado;
+    $types .= 's';
+}
+
+if ($filtro_prioridad > 0) {
+    $query_tickets .= " AND t.prioridad_id = ?";
+    $params[] = $filtro_prioridad;
+    $types .= 'i';
+}
+
+if ($filtro_categoria > 0) {
+    $query_tickets .= " AND t.categoria_id = ?";
+    $params[] = $filtro_categoria;
+    $types .= 'i';
+}
+
+if ($busqueda != '') {
+    $query_tickets .= " AND (t.asunto LIKE ? OR t.descripcion LIKE ? OR t.numero_serie LIKE ? OR e.nombre LIKE ?)";
+    $search_term = "%$busqueda%";
+    $params[] = $search_term;
+    $params[] = $search_term;
+    $params[] = $search_term;
+    $params[] = $search_term;
+    $types .= 'ssss';
+}
+
+$query_tickets .= " ORDER BY t.fecha_creacion DESC";
+
+// Preparar y ejecutar consulta con filtros
+$stmt_tickets = $conn->prepare($query_tickets);
+if (!empty($params)) {
+    $stmt_tickets->bind_param($types, ...$params);
+}
+$stmt_tickets->execute();
+$tickets = $stmt_tickets->get_result();
 ?>
 
 <!DOCTYPE html>
@@ -196,6 +283,7 @@ $tickets = $conn->query("
   <title>Sistema de Tickets - Rio Casino</title>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@sweetalert2/theme-bootstrap-4/bootstrap-4.css">
   <style>
     .datos-empleado {
       background-color: #f8f9fa;
@@ -299,6 +387,24 @@ $tickets = $conn->query("
     .ticket-detalle {
       margin-bottom: 10px;
     }
+    .prioridad-critica { border-left: 4px solid #dc3545; }
+    .prioridad-media { border-left: 4px solid #ffc107; }
+    .prioridad-baja { border-left: 4px solid #198754; }
+    .filtros-container {
+      background-color: #f8f9fa;
+      padding: 15px;
+      border-radius: 5px;
+      margin-bottom: 20px;
+    }
+    .badge-prioridad {
+      font-size: 0.8rem;
+      padding: 4px 8px;
+    }
+    .badge-categoria {
+      font-size: 0.8rem;
+      padding: 4px 8px;
+      background-color: #6c757d;
+    }
   </style>
 </head>
 <body class="bg-light">
@@ -312,102 +418,179 @@ $tickets = $conn->query("
     </div>
   </div>
 
-  <?php if ($mensaje != ""): ?>
-    <div class="alert alert-info alert-dismissible fade show">
-      <?php echo htmlspecialchars($mensaje); ?>
+  <!-- Filtros de búsqueda -->
+  <div class="filtros-container">
+    <form method="get" class="row g-3">
+      <div class="col-md-3">
+        <label class="form-label">Estado</label>
+        <select name="estado" class="form-select">
+          <option value="">Todos los estados</option>
+          <option value="Abierto" <?= $filtro_estado == 'Abierto' ? 'selected' : '' ?>>Abierto</option>
+          <option value="En proceso" <?= $filtro_estado == 'En proceso' ? 'selected' : '' ?>>En proceso</option>
+          <option value="Cerrado" <?= $filtro_estado == 'Cerrado' ? 'selected' : '' ?>>Cerrado</option>
+        </select>
+      </div>
+      <div class="col-md-3">
+        <label class="form-label">Prioridad</label>
+        <select name="prioridad" class="form-select">
+          <option value="0">Todas las prioridades</option>
+          <?php while ($p = $prioridades->fetch_assoc()): ?>
+            <option value="<?= $p['prioridad_id'] ?>" <?= $filtro_prioridad == $p['prioridad_id'] ? 'selected' : '' ?>>
+              <?= htmlspecialchars($p['nombre']) ?>
+            </option>
+          <?php endwhile; ?>
+        </select>
+      </div>
+      <div class="col-md-3">
+        <label class="form-label">Categoría</label>
+        <select name="categoria" class="form-select">
+          <option value="0">Todas las categorías</option>
+          <?php while ($cat = $categorias->fetch_assoc()): ?>
+            <option value="<?= $cat['categoria_id'] ?>" <?= $filtro_categoria == $cat['categoria_id'] ? 'selected' : '' ?>>
+              <?= htmlspecialchars($cat['nombre']) ?>
+            </option>
+          <?php endwhile; ?>
+        </select>
+      </div>
+      <div class="col-md-3">
+        <label class="form-label">Buscar</label>
+        <div class="input-group">
+          <input type="text" name="busqueda" class="form-control" placeholder="Buscar..." value="<?= htmlspecialchars($busqueda) ?>">
+          <button type="submit" class="btn btn-primary">
+            <i class="bi bi-search"></i>
+          </button>
+          <?php if ($filtro_estado != '' || $filtro_prioridad > 0 || $filtro_categoria > 0 || $busqueda != ''): ?>
+            <a href="<?= strtok($_SERVER['REQUEST_URI'], '?') ?>" class="btn btn-outline-secondary">
+              <i class="bi bi-x-circle"></i>
+            </a>
+          <?php endif; ?>
+        </div>
+      </div>
+    </form>
+  </div>
+
+  <!-- Notificación -->
+  <?php if (isset($_SESSION['notificacion'])): ?>
+    <div class="alert alert-<?= $_SESSION['notificacion']['tipo'] ?> alert-dismissible fade show">
+      <?= $_SESSION['notificacion']['mensaje'] ?>
       <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Cerrar"></button>
     </div>
+    <?php unset($_SESSION['notificacion']); ?>
   <?php endif; ?>
 
   <!-- Listado de Tickets -->
   <div class="row">
     <?php while ($ticket = $tickets->fetch_assoc()): ?>
+      <?php
+      // Determinar clase de prioridad
+      $prioridad_class = '';
+      if ($ticket['prioridad'] == 'Crítica (Alta)') {
+          $prioridad_class = 'prioridad-critica';
+      } elseif ($ticket['prioridad'] == 'Media') {
+          $prioridad_class = 'prioridad-media';
+      } elseif ($ticket['prioridad'] == 'Baja') {
+          $prioridad_class = 'prioridad-baja';
+      }
+      ?>
       <div class="col-md-6">
-        <div class="card card-ticket">
+        <div class="card card-ticket <?= $prioridad_class ?>">
           <div class="card-header">
             <div class="ticket-header">
-              <h5 class="card-title mb-0">Ticket #<?php echo $ticket['id']; ?></h5>
+              <h5 class="card-title mb-0">Ticket #<?= $ticket['id'] ?></h5>
               <div>
-                <span class="badge badge-estado estado-<?php echo strtolower(str_replace(' ', '-', $ticket['estado'])); ?>">
-                  <?php echo $ticket['estado']; ?>
+                <span class="badge badge-estado estado-<?= strtolower(str_replace(' ', '-', $ticket['estado'])) ?>">
+                  <?= $ticket['estado'] ?>
                 </span>
                 <?php if (!empty($ticket['nombre_departamento'])): ?>
                   <span class="ubicacion-badge ms-2">
-                    <i class="bi bi-geo-alt"></i> <?php echo htmlspecialchars($ticket['nombre_departamento']); ?>
+                    <i class="bi bi-geo-alt"></i> <?= htmlspecialchars($ticket['nombre_departamento']) ?>
                   </span>
                 <?php endif; ?>
               </div>
             </div>
             <div class="ticket-fechas mt-2">
               <small>
-                Creado: <?php echo date('d/m/Y H:i', strtotime($ticket['fecha_creacion'])); ?>
+                Creado: <?= date('d/m/Y H:i', strtotime($ticket['fecha_creacion'])) ?>
                 <?php if ($ticket['fecha_proceso']): ?>
-                  | En proceso: <?php echo date('d/m/Y H:i', strtotime($ticket['fecha_proceso'])); ?>
+                  | En proceso: <?= date('d/m/Y H:i', strtotime($ticket['fecha_proceso'])) ?>
                 <?php endif; ?>
                 <?php if ($ticket['fecha_cierre']): ?>
-                  | Cerrado: <?php echo date('d/m/Y H:i', strtotime($ticket['fecha_cierre'])); ?>
+                  | Cerrado: <?= date('d/m/Y H:i', strtotime($ticket['fecha_cierre'])) ?>
                 <?php endif; ?>
               </small>
             </div>
           </div>
           <div class="card-body">
-            <h6 class="card-subtitle mb-2 text-muted"><?php echo htmlspecialchars($ticket['asunto']); ?></h6>
+            <h6 class="card-subtitle mb-2 text-muted"><?= htmlspecialchars($ticket['asunto']) ?></h6>
+            
+            <div class="d-flex gap-2 mb-2">
+              <?php if (!empty($ticket['prioridad'])): ?>
+                <span class="badge bg-danger badge-prioridad">
+                  <i class="bi bi-exclamation-triangle"></i> <?= htmlspecialchars($ticket['prioridad']) ?>
+                </span>
+              <?php endif; ?>
+              <?php if (!empty($ticket['categoria'])): ?>
+                <span class="badge badge-categoria">
+                  <i class="bi bi-tag"></i> <?= htmlspecialchars($ticket['categoria']) ?>
+                </span>
+              <?php endif; ?>
+            </div>
             
             <?php if ($ticket['tipo_equipo'] == 'maquina_juego' && !empty($ticket['numero_serie'])): ?>
               <div class="equipo-info">
                 <div class="maquina-info-grid">
                   <div class="maquina-info-item">
-                    <span class="maquina-info-label">Máquina:</span> <?php echo htmlspecialchars($ticket['nombre_maquina'] ?? 'N/A'); ?>
+                    <span class="maquina-info-label">Máquina:</span> <?= htmlspecialchars($ticket['nombre_maquina'] ?? 'N/A') ?>
                   </div>
                   <div class="maquina-info-item">
-                    <span class="maquina-info-label">Modelo:</span> <?php echo htmlspecialchars($ticket['modelo'] ?? 'N/A'); ?>
+                    <span class="maquina-info-label">Modelo:</span> <?= htmlspecialchars($ticket['modelo'] ?? 'N/A') ?>
                   </div>
                   <div class="maquina-info-item">
-                    <span class="maquina-info-label">Marca:</span> <?php echo htmlspecialchars($ticket['marca'] ?? 'N/A'); ?>
+                    <span class="maquina-info-label">Marca:</span> <?= htmlspecialchars($ticket['marca'] ?? 'N/A') ?>
                   </div>
                   <div class="maquina-info-item">
-                    <span class="maquina-info-label">N° Serie:</span> <?php echo htmlspecialchars($ticket['numero_serie']); ?>
+                    <span class="maquina-info-label">N° Serie:</span> <?= htmlspecialchars($ticket['numero_serie']) ?>
                   </div>
                   <div class="maquina-info-item">
-                    <span class="maquina-info-label">eBox MAC:</span> <?php echo htmlspecialchars($ticket['ebox_mac'] ?? 'N/A'); ?>
+                    <span class="maquina-info-label">eBox MAC:</span> <?= htmlspecialchars($ticket['ebox_mac'] ?? 'N/A') ?>
                   </div>
                   <div class="maquina-info-item">
-                    <span class="maquina-info-label">Estado:</span> <?php echo htmlspecialchars($ticket['estado_maquina'] ?? 'N/A'); ?>
+                    <span class="maquina-info-label">Estado:</span> <?= htmlspecialchars($ticket['estado_maquina'] ?? 'N/A') ?>
                   </div>
                 </div>
               </div>
             <?php elseif (!empty($ticket['tipo_equipo'])): ?>
               <div class="equipo-info">
-                <p class="mb-1"><strong>Tipo de Equipo:</strong> <?php echo ucfirst(str_replace('_', ' ', $ticket['tipo_equipo'])); ?></p>
+                <p class="mb-1"><strong>Tipo de Equipo:</strong> <?= ucfirst(str_replace('_', ' ', $ticket['tipo_equipo'])) ?></p>
                 <?php if (!empty($ticket['numero_serie'])): ?>
-                  <p class="mb-1"><strong>N° Serie:</strong> <?php echo htmlspecialchars($ticket['numero_serie']); ?></p>
+                  <p class="mb-1"><strong>N° Serie:</strong> <?= htmlspecialchars($ticket['numero_serie']) ?></p>
                 <?php endif; ?>
               </div>
             <?php endif; ?>
             
             <div class="ticket-detalle">
-              <p class="card-text"><?php echo nl2br(htmlspecialchars($ticket['descripcion'])); ?></p>
+              <p class="card-text"><?= nl2br(htmlspecialchars($ticket['descripcion'])) ?></p>
             </div>
             
             <div class="d-flex justify-content-between text-muted small">
               <div>
-                <strong>Solicitante:</strong> <?php echo htmlspecialchars($ticket['empleado_nombre']); ?>
+                <strong>Solicitante:</strong> <?= htmlspecialchars($ticket['empleado_nombre']) ?>
               </div>
               <div>
-                <strong>Creado por:</strong> <?php echo htmlspecialchars($ticket['creador']); ?>
+                <strong>Creado por:</strong> <?= htmlspecialchars($ticket['creador']) ?>
               </div>
             </div>
             
             <?php if (!empty($ticket['asignado'])): ?>
               <div class="mt-2">
-                <strong>Asignado a:</strong> <?php echo htmlspecialchars($ticket['asignado']); ?>
+                <strong>Asignado a:</strong> <?= htmlspecialchars($ticket['asignado']) ?>
               </div>
             <?php endif; ?>
             
             <?php if (!empty($ticket['comentarios'])): ?>
               <div class="alert alert-secondary mt-2">
                 <strong>Comentarios:</strong>
-                <p class="mb-0"><?php echo nl2br(htmlspecialchars($ticket['comentarios'])); ?></p>
+                <p class="mb-0"><?= nl2br(htmlspecialchars($ticket['comentarios'])) ?></p>
               </div>
             <?php endif; ?>
           </div>
@@ -415,30 +598,34 @@ $tickets = $conn->query("
           <div class="card-footer bg-transparent acciones-ticket">
             <button class="btn btn-sm btn-outline-primary" data-bs-toggle="modal" 
                     data-bs-target="#modalVerTicket" 
-                    data-ticket-id="<?php echo $ticket['id']; ?>">
+                    data-ticket-id="<?= $ticket['id'] ?>">
               <i class="bi bi-eye"></i> Ver
             </button>
             
-            <?php if ($rol == 'SuperAdmin'): ?>
+            <?php if ($rol == 'SuperAdmin' || $rol == 'Admin'): ?>
               <button class="btn btn-sm btn-outline-warning" data-bs-toggle="modal" 
                       data-bs-target="#modalEditarTicket" 
-                      data-ticket-id="<?php echo $ticket['id']; ?>"
-                      data-estado-actual="<?php echo $ticket['estado']; ?>"
-                      data-asignado-actual="<?php echo isset($ticket['asignado_a']) ? $ticket['asignado_a'] : ''; ?>"
-                      data-comentarios-actual="<?php echo isset($ticket['comentarios']) ? htmlspecialchars($ticket['comentarios']) : ''; ?>"
-                      data-asunto-actual="<?php echo htmlspecialchars($ticket['asunto']); ?>"
-                      data-descripcion-actual="<?php echo htmlspecialchars($ticket['descripcion']); ?>"
-                      data-tipo-equipo-actual="<?php echo $ticket['tipo_equipo']; ?>"
-                      data-numero-serie-actual="<?php echo htmlspecialchars($ticket['numero_serie']); ?>"
-                      data-departamento-actual="<?php echo $ticket['departamento_id']; ?>"
-                      data-empleado-actual="<?php echo $ticket['empleado_id']; ?>">
+                      data-ticket-id="<?= $ticket['id'] ?>"
+                      data-estado-actual="<?= $ticket['estado'] ?>"
+                      data-asignado-actual="<?= isset($ticket['asignado_a']) ? $ticket['asignado_a'] : '' ?>"
+                      data-comentarios-actual="<?= isset($ticket['comentarios']) ? htmlspecialchars($ticket['comentarios']) : '' ?>"
+                      data-asunto-actual="<?= htmlspecialchars($ticket['asunto']) ?>"
+                      data-descripcion-actual="<?= htmlspecialchars($ticket['descripcion']) ?>"
+                      data-tipo-equipo-actual="<?= $ticket['tipo_equipo'] ?>"
+                      data-numero-serie-actual="<?= htmlspecialchars($ticket['numero_serie']) ?>"
+                      data-departamento-actual="<?= $ticket['departamento_id'] ?>"
+                      data-empleado-actual="<?= $ticket['empleado_id'] ?>"
+                      data-prioridad-actual="<?= $ticket['prioridad_id'] ?>"
+                      data-categoria-actual="<?= $ticket['categoria_id'] ?>">
                 <i class="bi bi-pencil"></i> Editar
               </button>
               
-              <a href="?eliminar=<?php echo $ticket['id']; ?>" class="btn btn-sm btn-outline-danger" 
-                 onclick="return confirm('¿Estás seguro de eliminar este ticket?')">
-                <i class="bi bi-trash"></i> Eliminar
-              </a>
+              <?php if ($rol == 'SuperAdmin'): ?>
+                <a href="?eliminar=<?= $ticket['id'] ?>" class="btn btn-sm btn-outline-danger" 
+                   onclick="return confirm('¿Estás seguro de eliminar este ticket?')">
+                  <i class="bi bi-trash"></i> Eliminar
+                </a>
+              <?php endif; ?>
             <?php endif; ?>
           </div>
         </div>
@@ -479,15 +666,43 @@ $tickets = $conn->query("
         </div>
 
         <div class="row mb-3">
-          <div class="col-md-6">
+          <div class="col-md-4">
             <label class="form-label fw-bold required-field">Departamento</label>
             <select name="departamento_id" class="form-select" required>
               <option value="">-- Seleccione departamento --</option>
               <?php 
               $departamentos->data_seek(0);
               while ($dep = $departamentos->fetch_assoc()): ?>
-                <option value="<?php echo $dep['departamento_id']; ?>">
-                  <?php echo htmlspecialchars($dep['nombre']); ?>
+                <option value="<?= $dep['departamento_id'] ?>">
+                  <?= htmlspecialchars($dep['nombre']) ?>
+                </option>
+              <?php endwhile; ?>
+            </select>
+          </div>
+          
+          <div class="col-md-4">
+            <label class="form-label fw-bold required-field">Prioridad</label>
+            <select name="prioridad_id" class="form-select" required>
+              <option value="">-- Seleccione prioridad --</option>
+              <?php 
+              $prioridades->data_seek(0);
+              while ($p = $prioridades->fetch_assoc()): ?>
+                <option value="<?= $p['prioridad_id'] ?>">
+                  <?= htmlspecialchars($p['nombre']) ?>
+                </option>
+              <?php endwhile; ?>
+            </select>
+          </div>
+          
+          <div class="col-md-4">
+            <label class="form-label fw-bold required-field">Categoría</label>
+            <select name="categoria_id" class="form-select" required>
+              <option value="">-- Seleccione categoría --</option>
+              <?php 
+              $categorias->data_seek(0);
+              while ($cat = $categorias->fetch_assoc()): ?>
+                <option value="<?= $cat['categoria_id'] ?>">
+                  <?= htmlspecialchars($cat['nombre']) ?>
                 </option>
               <?php endwhile; ?>
             </select>
@@ -524,12 +739,12 @@ $tickets = $conn->query("
               $empleados->data_seek(0);
               while ($e = $empleados->fetch_assoc()): ?>
                 <option 
-                  value="<?php echo $e['empleado_id']; ?>" 
-                  data-nombre="<?php echo htmlspecialchars($e['nombre']); ?>"
-                  data-cargo="<?php echo htmlspecialchars($e['cargo']); ?>"
-                  data-area="<?php echo htmlspecialchars($e['area']); ?>"
+                  value="<?= $e['empleado_id'] ?>" 
+                  data-nombre="<?= htmlspecialchars($e['nombre']) ?>"
+                  data-cargo="<?= htmlspecialchars($e['cargo']) ?>"
+                  data-area="<?= htmlspecialchars($e['area']) ?>"
                 >
-                  <?php echo htmlspecialchars($e['nombre']); ?> (<?php echo htmlspecialchars($e['cargo']); ?>)
+                  <?= htmlspecialchars($e['nombre']) ?> (<?= htmlspecialchars($e['cargo']) ?>)
                 </option>
               <?php endwhile; ?>
             </select>
@@ -590,8 +805,8 @@ $tickets = $conn->query("
   </div>
 </div>
 
-<!-- Modal para editar ticket (Solo SuperAdmin) -->
-<?php if ($rol == 'SuperAdmin'): ?>
+<!-- Modal para editar ticket (Solo Admin/SuperAdmin) -->
+<?php if ($rol == 'SuperAdmin' || $rol == 'Admin'): ?>
 <div class="modal fade" id="modalEditarTicket" tabindex="-1" aria-hidden="true">
   <div class="modal-dialog modal-lg">
     <form method="post" class="modal-content">
@@ -623,19 +838,47 @@ $tickets = $conn->query("
         </div>
 
         <div class="row mb-3">
-          <div class="col-md-6">
+          <div class="col-md-4">
             <label class="form-label fw-bold required-field">Departamento</label>
             <select name="departamento_id" id="editarDepartamento" class="form-select" required>
               <?php 
               $departamentos->data_seek(0);
               while ($dep = $departamentos->fetch_assoc()): ?>
-                <option value="<?php echo $dep['departamento_id']; ?>">
-                  <?php echo htmlspecialchars($dep['nombre']); ?>
+                <option value="<?= $dep['departamento_id'] ?>">
+                  <?= htmlspecialchars($dep['nombre']) ?>
                 </option>
               <?php endwhile; ?>
             </select>
           </div>
           
+          <div class="col-md-4">
+            <label class="form-label fw-bold">Prioridad</label>
+            <select name="prioridad_id" id="editarPrioridad" class="form-select" required>
+              <?php 
+              $prioridades->data_seek(0);
+              while ($p = $prioridades->fetch_assoc()): ?>
+                <option value="<?= $p['prioridad_id'] ?>">
+                  <?= htmlspecialchars($p['nombre']) ?>
+                </option>
+              <?php endwhile; ?>
+            </select>
+          </div>
+          
+          <div class="col-md-4">
+            <label class="form-label fw-bold">Categoría</label>
+            <select name="categoria_id" id="editarCategoria" class="form-select" required>
+              <?php 
+              $categorias->data_seek(0);
+              while ($cat = $categorias->fetch_assoc()): ?>
+                <option value="<?= $cat['categoria_id'] ?>">
+                  <?= htmlspecialchars($cat['nombre']) ?>
+                </option>
+              <?php endwhile; ?>
+            </select>
+          </div>
+        </div>
+
+        <div class="row mb-3">
           <div class="col-md-6">
             <label class="form-label fw-bold">Estado del Ticket</label>
             <select name="nuevo_estado" id="editarEstado" class="form-select">
@@ -673,12 +916,12 @@ $tickets = $conn->query("
               $empleados->data_seek(0);
               while ($e = $empleados->fetch_assoc()): ?>
                 <option 
-                  value="<?php echo $e['empleado_id']; ?>" 
-                  data-nombre="<?php echo htmlspecialchars($e['nombre']); ?>"
-                  data-cargo="<?php echo htmlspecialchars($e['cargo']); ?>"
-                  data-area="<?php echo htmlspecialchars($e['area']); ?>"
+                  value="<?= $e['empleado_id'] ?>" 
+                  data-nombre="<?= htmlspecialchars($e['nombre']) ?>"
+                  data-cargo="<?= htmlspecialchars($e['cargo']) ?>"
+                  data-area="<?= htmlspecialchars($e['area']) ?>"
                 >
-                  <?php echo htmlspecialchars($e['nombre']); ?> (<?php echo htmlspecialchars($e['cargo']); ?>)
+                  <?= htmlspecialchars($e['nombre']) ?> (<?= htmlspecialchars($e['cargo']) ?>)
                 </option>
               <?php endwhile; ?>
             </select>
@@ -691,7 +934,7 @@ $tickets = $conn->query("
               <?php 
               $administradores->data_seek(0);
               while ($admin = $administradores->fetch_assoc()): ?>
-                <option value="<?php echo $admin['Usuario_id']; ?>"><?php echo htmlspecialchars($admin['usuario']); ?></option>
+                <option value="<?= $admin['Usuario_id'] ?>"><?= htmlspecialchars($admin['usuario']) ?></option>
               <?php endwhile; ?>
             </select>
           </div>
@@ -746,7 +989,23 @@ $tickets = $conn->query("
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/quagga@0.12.1/dist/quagga.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 <script>
+// Mostrar notificación si existe
+<?php if (isset($_SESSION['notificacion'])): ?>
+  Swal.fire({
+    icon: '<?= $_SESSION['notificacion']['tipo'] === 'success' ? 'success' : 
+             ($_SESSION['notificacion']['tipo'] === 'danger' ? 'error' : 'warning') ?>',
+    title: '<?= $_SESSION['notificacion']['mensaje'] ?>',
+    toast: true,
+    position: 'top-end',
+    showConfirmButton: false,
+    timer: 3000,
+    timerProgressBar: true
+  });
+  <?php unset($_SESSION['notificacion']); ?>
+<?php endif; ?>
+
 // Mostrar/ocultar campos según tipo de equipo
 function toggleCamposEquipo() {
   const tipo = document.getElementById("tipoEquipo").value;
@@ -792,8 +1051,8 @@ document.getElementById("numeroSerie").addEventListener('input', function() {
     return;
   }
   
-  const seriesValidas = <?php echo json_encode($series_validas); ?>;
-  const infoMaquinas = <?php echo json_encode($info_maquinas); ?>;
+  const seriesValidas = <?= json_encode($series_validas) ?>;
+  const infoMaquinas = <?= json_encode($info_maquinas) ?>;
   
   if (seriesValidas.includes(serie)) {
     const maquina = infoMaquinas[serie];
@@ -839,7 +1098,11 @@ function iniciarEscaneo(targetField = 'numeroSerie') {
   }, function(err) {
     if (err) {
       console.error(err);
-      alert("Error al iniciar el escáner: " + err.message);
+      Swal.fire({
+        icon: 'error',
+        title: 'Error al iniciar el escáner',
+        text: err.message
+      });
       scannerContainer.style.display = 'none';
       return;
     }
@@ -857,7 +1120,15 @@ function iniciarEscaneo(targetField = 'numeroSerie') {
     document.getElementById(targetField).dispatchEvent(event);
     
     // Mostrar notificación
-    mostrarNotificacion('Código escaneado: ' + code, 'success');
+    Swal.fire({
+      icon: 'success',
+      title: 'Código escaneado',
+      text: code,
+      toast: true,
+      position: 'top-end',
+      showConfirmButton: false,
+      timer: 2000
+    });
   });
 }
 
@@ -868,30 +1139,6 @@ document.getElementById("scanner-close").addEventListener('click', function() {
   }
   document.getElementById("scanner-container").style.display = 'none';
 });
-
-// Mostrar notificación
-function mostrarNotificacion(mensaje, tipo = 'info') {
-  const toastHTML = `
-    <div class="position-fixed bottom-0 end-0 p-3" style="z-index: 11">
-      <div class="toast show align-items-center text-white bg-${tipo} border-0" role="alert" aria-live="assertive" aria-atomic="true">
-        <div class="d-flex">
-          <div class="toast-body">
-            ${mensaje}
-          </div>
-          <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Cerrar"></button>
-        </div>
-      </div>
-    </div>
-  `;
-  
-  const toastContainer = document.createElement('div');
-  toastContainer.innerHTML = toastHTML;
-  document.body.appendChild(toastContainer);
-  
-  setTimeout(() => {
-    toastContainer.remove();
-  }, 3000);
-}
 
 // Configurar modal de visualización
 const modalVer = document.getElementById('modalVerTicket');
@@ -914,8 +1161,8 @@ if (modalVer) {
   });
 }
 
-// Configurar modal de edición para SuperAdmin
-<?php if ($rol == 'SuperAdmin'): ?>
+// Configurar modal de edición para Admin/SuperAdmin
+<?php if ($rol == 'SuperAdmin' || $rol == 'Admin'): ?>
 // Funciones para el formulario de edición
 function toggleCamposEquipoEdit() {
   const tipo = document.getElementById("editarTipoEquipo").value;
@@ -951,8 +1198,8 @@ function validarSerieEdit(serie) {
   const valido = document.getElementById("editarSerieValida");
   const invalido = document.getElementById("editarSerieInvalida");
   
-  const seriesValidas = <?php echo json_encode($series_validas); ?>;
-  const infoMaquinas = <?php echo json_encode($info_maquinas); ?>;
+  const seriesValidas = <?= json_encode($series_validas) ?>;
+  const infoMaquinas = <?= json_encode($info_maquinas) ?>;
   
   if (seriesValidas.includes(serie)) {
     const maquina = infoMaquinas[serie];
@@ -990,6 +1237,8 @@ if (modalEditar) {
     const numeroSerieActual = button.getAttribute('data-numero-serie-actual');
     const departamentoActual = button.getAttribute('data-departamento-actual');
     const empleadoActual = button.getAttribute('data-empleado-actual');
+    const prioridadActual = button.getAttribute('data-prioridad-actual');
+    const categoriaActual = button.getAttribute('data-categoria-actual');
     
     // Llenar el formulario
     document.getElementById('editarTicketId').value = ticketId;
@@ -1002,6 +1251,8 @@ if (modalEditar) {
     document.getElementById('editarNumeroSerie').value = numeroSerieActual;
     document.getElementById('editarDepartamento').value = departamentoActual;
     document.getElementById('editarEmpleadoSelect').value = empleadoActual;
+    document.getElementById('editarPrioridad').value = prioridadActual || '';
+    document.getElementById('editarCategoria').value = categoriaActual || '';
     
     // Actualizar campos dependientes
     toggleCamposEquipoEdit();
