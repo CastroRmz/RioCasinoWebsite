@@ -146,7 +146,7 @@ $orden = isset($_GET['orden']) ? $_GET['orden'] : 'idmac';
 $direccion = isset($_GET['dir']) ? $_GET['dir'] : 'DESC';
 
 // Validar campos de ordenación permitidos
-$campos_orden = ['idmac', 'nombre', 'modelo', 'marca', 'numero_serie', 'estado', 'fecha_creacion', 'fecha_ultimo_mtto', 'proximo_mtto'];
+$campos_orden = ['idmac', 'nombre', 'modelo', 'marca', 'numero_serie', 'estado', 'fecha_creacion'];
 if (!in_array($orden, $campos_orden)) {
     $orden = 'idmac';
 }
@@ -520,17 +520,6 @@ if ($result->num_rows > 0) {
                             Estado <?= $orden === 'estado' ? ($direccion === 'ASC' ? '↑' : '↓') : '' ?>
                         </a>
                     </th>
-                    <th width="120">
-                        <a href="?<?= http_build_query(array_merge($_GET, ['orden' => 'fecha_ultimo_mtto', 'dir' => $orden === 'fecha_ultimo_mtto' && $direccion === 'DESC' ? 'ASC' : 'DESC'])) ?>">
-                            Último Mtto <?= $orden === 'fecha_ultimo_mtto' ? ($direccion === 'ASC' ? '↑' : '↓') : '' ?>
-                        </a>
-                    </th>
-                    <th width="120">
-                        <a href="?<?= http_build_query(array_merge($_GET, ['orden' => 'proximo_mtto', 'dir' => $orden === 'proximo_mtto' && $direccion === 'DESC' ? 'ASC' : 'DESC'])) ?>">
-                            Próximo Mtto <?= $orden === 'proximo_mtto' ? ($direccion === 'ASC' ? '↑' : '↓') : '' ?>
-                        </a>
-                    </th>
-                    <th width="100">Garantía</th>
                     <th width="100">Usuario</th>
                     <th width="250">Acciones</th>
                 </tr>
@@ -550,13 +539,6 @@ if ($result->num_rows > 0) {
                             ($row['estado'] == 'Alta') ? 'success' : 
                             (($row['estado'] == 'Baja') ? 'danger' : 'warning') ?>">
                             <?= htmlspecialchars($row['estado'] ?? '') ?>
-                        </span>
-                    </td>
-                    <td><?= !empty($row['fecha_ultimo_mtto']) ? date('d/m/Y', strtotime($row['fecha_ultimo_mtto'])) : 'Nunca' ?></td>
-                    <td><?= !empty($row['proximo_mtto']) ? date('d/m/Y', strtotime($row['proximo_mtto'])) : 'No programado' ?></td>
-                    <td>
-                        <span class="badge bg-<?= $row['garantia_vigente'] ? 'success' : 'danger' ?>">
-                            <?= $row['garantia_vigente'] ? 'Vigente' : 'Vencida' ?>
                         </span>
                     </td>
                     <td><?= htmlspecialchars($row['usuario'] ?? '') ?></td>
@@ -582,7 +564,7 @@ if ($result->num_rows > 0) {
                 <?php endwhile; ?>
             <?php else: ?>
                 <tr>
-                    <td colspan="13" class="text-center py-4">No se encontraron máquinas con los filtros aplicados</td>
+                    <td colspan="9" class="text-center py-4">No se encontraron máquinas con los filtros aplicados</td>
                 </tr>
             <?php endif; ?>
             </tbody>
